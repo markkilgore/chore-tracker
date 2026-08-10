@@ -95,6 +95,7 @@ make compose-check-prod
 The suite covers calendar boundaries, DST-local dates, recurrence, out-of-order rotation generation, week materialization, explicit current-week application, overrides, optimistic revisions, open eligibility, actual-versus-planned completers, correction history, chart manifests, print HTML, SQLite health, migrations, documentation links, and development/production isolation.
 
 The production Docker build runs tests, type checking, and the Next.js build inside the builder stage before producing an image.
+Native dependency compilation tools are installed only in that transient build stage; they are not included in the production runtime image.
 
 ## Generated and local-only files
 
