@@ -23,7 +23,7 @@ For two children making their beds, create one `Make bed` definition and two fix
 
 Stopping a standing responsibility affects future ungenerated weeks. Existing generated weeks remain unchanged. To replace a schedule safely, stop the old responsibility and create its replacement; this preserves historical weeks.
 
-For setup mistakes, **Assign forward** changes a standing responsibility to one fixed member from the selected week onward. It also corrects generated chores that remain uncompleted, while preserving completed chores and explicit week-level reassignments. **Delete** removes the responsibility and its unused generated chores. Deletion is refused once completion history, issued charts, or replacement records depend on it; use Stop in those cases.
+For setup mistakes, **Assign forward** changes a standing responsibility to one fixed member from the selected week onward. It also corrects generated chores that remain uncompleted, while preserving completed chores and explicit week-level reassignments. **Delete** removes the responsibility and its unused generated chores, then refreshes the selected week. Deletion is refused once completion or replacement history depends on it; use Stop in those cases. Previously issued charts remain unchanged snapshots, so discard and reissue a chart after correcting its week.
 
 ## Weekly board
 

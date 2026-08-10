@@ -570,15 +570,6 @@ export function deleteResponsibility(
     if (hasCompletions) {
       throw new Error("This responsibility has completion history and cannot be deleted. End it instead.");
     }
-    const hasIssuedChart = db.prepare(`
-      SELECT 1 FROM chart_exports x
-      WHERE x.weekly_plan_id IN (
-        SELECT DISTINCT weekly_plan_id FROM chore_occurrences WHERE source_template_id = ?
-      ) LIMIT 1
-    `).get(templateId);
-    if (hasIssuedChart) {
-      throw new Error("A chart was already issued for a week containing this responsibility. End it instead.");
-    }
     const hasReplacement = db.prepare(`
       SELECT 1 FROM chore_occurrences
       WHERE replaces_occurrence_id IN (SELECT id FROM chore_occurrences WHERE source_template_id = ?)

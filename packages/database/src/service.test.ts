@@ -123,7 +123,7 @@ describe("SQLite application model", () => {
     expect(getDashboard(undefined, db)!.week.revision).toBe(applied.revision + 1);
   });
 
-  it("protects completed or printed responsibility history from deletion", () => {
+  it("protects completed history while keeping issued charts immutable", () => {
     const dashboard = getDashboard(undefined, db)!;
     const completedTemplateId = createResponsibility(dashboard.household.id, {
       choreDefinitionId: dashboard.chores[0].id,
@@ -147,8 +147,11 @@ describe("SQLite application model", () => {
     const current = getDashboard(undefined, db)!;
     applyResponsibilityToWeek(printedTemplateId, current.week.id, current.week.revision, db);
     const afterApply = getDashboard(undefined, db)!;
-    createChartExport(afterApply.week.id, dashboard.members[1].id, undefined, db);
-    expect(() => deleteResponsibility(printedTemplateId, db)).toThrow(/chart was already issued/);
+    const chartId = createChartExport(afterApply.week.id, dashboard.members[1].id, undefined, db);
+    const issuedChart = getChartExport(chartId, db);
+
+    expect(deleteResponsibility(printedTemplateId, db).deletedOccurrenceCount).toBe(1);
+    expect(getChartExport(chartId, db)).toEqual(issuedChart);
   });
 
   it("keeps completion corrections instead of deleting history", () => {

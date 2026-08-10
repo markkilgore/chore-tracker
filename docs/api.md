@@ -55,7 +55,7 @@ Actions:
 
 ### `DELETE /api/v1/responsibilities/:templateId`
 
-Deletes a responsibility created in error and removes its unused generated occurrences. The request is rejected when completions, issued charts, replacements, or successor templates depend on it. Affected weekly-plan revisions are incremented.
+Deletes a responsibility created in error and removes its unused generated occurrences. The request is rejected when completions, replacements, or successor templates depend on it. Affected weekly-plan revisions are incremented. Existing chart exports remain immutable snapshots; clients should issue a replacement chart after correcting a printed week.
 
 ## Weekly editing
 

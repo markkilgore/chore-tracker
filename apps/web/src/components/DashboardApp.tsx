@@ -22,21 +22,24 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
   const [tab, setTab] = useState<Tab>("week");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [actorId, setActorId] = useState(initial?.members.find((member) => member.canAdminister)?.id ?? initial?.members[0]?.id ?? "");
   const [editorOpen, setEditorOpen] = useState(false);
   const [allocationKind, setAllocationKind] = useState<"fixed" | "rotation" | "open">("fixed");
 
   async function refresh(date = data?.week.weekStartDate) {
-    const next = await api<DashboardSnapshot>(`/api/v1/dashboard${date ? `?date=${date}` : ""}`);
+    const next = await api<DashboardSnapshot>(`/api/v1/dashboard${date ? `?date=${date}` : ""}`, { cache: "no-store" });
     setData(next);
   }
 
-  async function act(work: () => Promise<unknown>) {
+  async function act(work: () => Promise<unknown>, successMessage?: string) {
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       await work();
       await refresh();
+      if (successMessage) setNotice(successMessage);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Something went wrong");
     } finally {
@@ -134,12 +137,15 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
     await act(() => api(`/api/v1/responsibilities/${templateId}`, {
       method: "PATCH",
       body: JSON.stringify({ action: "reassign", memberId, effectiveFrom: data!.week.weekStartDate })
-    }));
+    }), `${choreTitle} is now assigned to ${memberName} from this week forward.`);
   }
 
   async function deleteStandingResponsibility(templateId: string, choreTitle: string) {
-    if (!window.confirm(`Delete the ${choreTitle} standing responsibility? Its unused generated chores will also be removed. Completed or printed history will be protected.`)) return;
-    await act(() => api(`/api/v1/responsibilities/${templateId}`, { method: "DELETE" }));
+    if (!window.confirm(`Delete the ${choreTitle} standing responsibility? Its unused generated chores will also be removed. Completion history remains protected; previously issued charts stay unchanged and should be reissued.`)) return;
+    await act(
+      () => api(`/api/v1/responsibilities/${templateId}`, { method: "DELETE" }),
+      `${choreTitle} was deleted and the schedule was refreshed.`
+    );
   }
 
   async function submitResponsibility(event: FormEvent<HTMLFormElement>) {
@@ -203,7 +209,10 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
       </aside>
 
       <section className="workspace">
-        {error && <div className="error-banner">{error}<button onClick={() => setError(null)}>×</button></div>}
+        {(error || notice) && <div className={`app-notice ${error ? "error" : "success"}`} role={error ? "alert" : "status"} aria-live="polite">
+          <span>{error ?? notice}</span>
+          <button type="button" aria-label="Dismiss notification" onClick={() => { setError(null); setNotice(null); }}>×</button>
+        </div>}
         {tab === "week" && <>
           <header className="topbar">
             <div>
@@ -292,8 +301,8 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
                     <button disabled={busy}>Assign forward</button>
                   </form>}
                 <div>
-                  {!responsibility.activeThrough && <button className="danger-link" disabled={busy} onClick={() => stopResponsibility(responsibility.id, responsibility.activeFrom)}>Stop</button>}
-                  <button className="danger-link" disabled={busy} onClick={() => deleteStandingResponsibility(responsibility.id, responsibility.choreTitle)}>Delete</button>
+                  {!responsibility.activeThrough && <button type="button" className="danger-link" disabled={busy} onClick={() => stopResponsibility(responsibility.id, responsibility.activeFrom)}>Stop</button>}
+                  <button type="button" className="danger-link" disabled={busy} onClick={() => deleteStandingResponsibility(responsibility.id, responsibility.choreTitle)}>Delete</button>
                 </div>
               </div>
             </article>)}</div>

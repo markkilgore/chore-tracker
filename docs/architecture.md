@@ -59,7 +59,7 @@ There is intentionally no second effective `weekly_overrides` overlay. After mat
 
 Generation is transactional and idempotent. A source-instance key prevents the same template/date pair from generating twice. Viewing an existing week does not reconcile it against later template edits.
 
-Two explicit correction operations cross that boundary deliberately. Reassigning a standing responsibility updates its allocation plus generated, uncompleted, non-overridden occurrences from an effective date. Deleting an erroneous responsibility removes only generated work that has no completion, issued-chart, or replacement dependency. Each affected weekly plan receives a new revision.
+Two explicit correction operations cross that boundary deliberately. Reassigning a standing responsibility updates its allocation plus generated, uncompleted, non-overridden occurrences from an effective date. Deleting an erroneous responsibility removes only generated work that has no completion or replacement dependency. Previously issued charts remain immutable historical snapshots and are not rewritten; after correcting a printed week, issue a replacement chart. Each affected weekly plan receives a new revision.
 
 ## Allocation semantics
 
