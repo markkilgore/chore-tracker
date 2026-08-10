@@ -35,4 +35,21 @@ describe("print chart renderer", () => {
     expect(html).toContain("theme-space");
     expect(html).toContain("Layout v1");
   });
+
+  it.each(["italy", "cats", "shark"])("renders the %s print theme", async (themeKey) => {
+    const snapshot: ChartSnapshot = {
+      chartId: `chart-${themeKey}`,
+      householdName: "Test Family",
+      memberId: "member-id",
+      memberName: "Alex",
+      weekStartDate: "2026-08-09",
+      themeKey,
+      planRevision: 1,
+      rows: []
+    };
+
+    const html = await renderChartHtml(snapshot, "abcdef0123456789");
+    expect(html).toContain(`chart-page theme-${themeKey}`);
+    expect(html).toContain(`.theme-${themeKey}`);
+  });
 });

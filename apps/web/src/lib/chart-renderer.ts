@@ -12,6 +12,10 @@ export const PRINT_CSS = `
   .theme-sunny { --accent: #d77a42; --soft: #f8e2c9; --ornament: "☀"; }
   .theme-space { --accent: #6257a4; --soft: #e5e1f3; --ornament: "★"; }
   .theme-ocean { --accent: #288da1; --soft: #d7edf0; --ornament: "≈"; }
+  .theme-italy { --accent: #238153; --soft: #e3f0e5; --ornament: "ITALIA"; }
+  .theme-italy.chart-page:before { background: linear-gradient(90deg, #238153 0 33%, #fffdf8 33% 66%, #c84b4b 66%); opacity: .88; }
+  .theme-cats { --accent: #c76d35; --soft: #fbe5cf; --ornament: "=^·^="; }
+  .theme-shark { --accent: #397993; --soft: #dcebf0; --ornament: "▲"; }
   .chart-header { display: flex; justify-content: space-between; align-items: flex-start; min-height: 1.35in; position: relative; z-index: 1; }
   .kicker { color: var(--accent); letter-spacing: .16em; font-size: 9px; font-weight: 900; text-transform: uppercase; margin: 0 0 6px; }
   h1 { font: bold 34px Georgia, serif; margin: 0; letter-spacing: -.5px; }

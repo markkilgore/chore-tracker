@@ -1,14 +1,18 @@
 import { z } from "zod";
+import { THEME_KEYS } from "./themes";
+
+export * from "./themes";
 
 export const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 export const memberKindSchema = z.enum(["CHILD", "ADULT", "OTHER"]);
 export const choreKindSchema = z.enum(["INDIVIDUAL", "HOUSEHOLD"]);
+export const themeKeySchema = z.enum(THEME_KEYS);
 
 export const createMemberSchema = z.object({
   displayName: z.string().trim().min(1).max(80),
   kind: memberKindSchema,
   canAdminister: z.boolean().default(false),
-  themeKey: z.enum(["sunny", "space", "ocean"]).default("sunny")
+  themeKey: themeKeySchema.default("sunny")
 });
 
 export const createChoreSchema = z.object({
@@ -44,7 +48,7 @@ export const updateMemberSchema = z.object({
   displayName: z.string().trim().min(1).max(80).optional(),
   kind: memberKindSchema.optional(),
   canAdminister: z.boolean().optional(),
-  themeKey: z.enum(["sunny", "space", "ocean"]).optional()
+  themeKey: themeKeySchema.optional()
 }).refine((input) => Object.keys(input).length > 0, "At least one field is required");
 
 export const updateChoreSchema = z.object({
@@ -70,5 +74,5 @@ export const completionSchema = z.object({
 export const chartExportSchema = z.object({
   weeklyPlanId: z.string().uuid(),
   memberId: z.string().uuid(),
-  themeKey: z.enum(["sunny", "space", "ocean"]).optional()
+  themeKey: themeKeySchema.optional()
 });

@@ -10,7 +10,7 @@ Tidy Week is a self-hosted family chore tracker. The web application is the sour
 - Sunday–Saturday weeks are generated from standing schedules and then edited independently.
 - One-off chores, week-only cancellation, moving, reassignment, ordering, completion, undo, and correction are supported.
 - The parent board, Chore Library, Family profiles, and touch-friendly Kid Today view are implemented.
-- Sunny, Space, and Ocean themes work on digital and printable surfaces.
+- Sunny, Space, Ocean, Italy, Cats, and Sharks themes work on digital and printable surfaces.
 - Issued charts have immutable snapshots, QR codes, checksums, and occurrence-linked checkbox manifests.
 - SQLite persistence, deterministic seed data, health checks, production containers, deployment rollback, and consistent backups are included.
 

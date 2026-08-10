@@ -21,7 +21,7 @@ There is no separate API container or database server. This keeps a single-famil
 ## Package responsibilities
 
 - `packages/domain` owns date-only calendar operations, Sunday week boundaries, recurrence expansion, deterministic rotation, and allocation types. It imports neither React nor SQLite.
-- `packages/contracts` owns Zod request validation and wire-level types.
+- `packages/contracts` owns Zod request validation, wire-level types, and the client-neutral theme catalog.
 - `packages/database` owns migrations, WAL/foreign-key configuration, transactions, repositories, plan revisions, completions, and chart snapshots.
 - `apps/web` owns the Next.js UI, route handlers, themes, print HTML, and Chromium PDF response.
 

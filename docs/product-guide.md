@@ -6,6 +6,8 @@ An empty installation opens a first-run screen. Create the real household there.
 
 Household members can be children, adults, or other members. Administrative capability is stored separately from member type, so an adult is not automatically an administrator and a chore assignee is never assumed to be a child.
 
+The Family page can remove a member who was added accidentally and has never been used. Members referenced by responsibilities, weekly chores, completions, or issued charts are retained to protect household history; reassign or end their work rather than silently deleting those records.
+
 ## Chore Library and standing schedules
 
 A **chore definition** is reusable, such as `Make bed` or `Feed dog`. Create it once even when several people perform it.
@@ -61,6 +63,8 @@ The PDF is US Letter portrait and contains:
 - Stable occurrence identifiers and deterministic checkbox coordinates in the retained manifest.
 
 Editing the live week after issuing a chart does not alter that chart. Issue a new chart to reflect the new schedule.
+
+Sunny, Space, Ocean, Italy, Cats, and Sharks themes share the same chart layout and stable checkbox geometry. A theme changes presentation without changing schedule or scan metadata.
 
 ## Deliberately post-MVP
 

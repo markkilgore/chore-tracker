@@ -42,6 +42,10 @@ Updates future-facing chore-definition fields. Existing occurrences retain their
 
 Updates member name, type, administrative flag, or theme.
 
+### `DELETE /api/v1/members/:memberId`
+
+Removes an accidentally added, unused member. The request is rejected when responsibilities, occurrences, completions, weekly changes, or chart exports reference the member, preserving historical identity.
+
 ### `PATCH /api/v1/responsibilities/:templateId`
 
 Ends a standing responsibility on a supplied date. Generated weeks are not rewritten.

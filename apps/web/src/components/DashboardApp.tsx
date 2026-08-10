@@ -1,6 +1,7 @@
 "use client";
 
 import type { DashboardSnapshot, WeekOccurrence } from "@chore-tracker/database";
+import { THEME_OPTIONS } from "@chore-tracker/contracts/themes";
 import { addDays, formatWeekRange, WEEKDAY_LABELS, type ISODate } from "@chore-tracker/domain";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -105,6 +106,15 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
 
   async function editMember(memberId: string, payload: object) {
     await act(() => api(`/api/v1/members/${memberId}`, { method: "PATCH", body: JSON.stringify(payload) }));
+  }
+
+  async function removeHouseholdMember(memberId: string, displayName: string) {
+    if (!window.confirm(`Remove ${displayName}? Only members without chore assignments or history can be removed.`)) return;
+    const replacementActorId = data!.members.find((member) => member.id !== memberId)?.id ?? "";
+    await act(async () => {
+      await api(`/api/v1/members/${memberId}`, { method: "DELETE" });
+      if (actorId === memberId) setActorId(replacementActorId);
+    });
   }
 
   async function stopResponsibility(templateId: string, activeFrom: ISODate) {
@@ -254,8 +264,8 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
 
         {tab === "family" && <section className="manage-page">
           <header><p className="eyebrow">YOUR HOUSEHOLD</p><h1>Everyone can pitch in.</h1><p>Children and adults share the same responsibility model, with a simpler view for kids.</p></header>
-          <div className="family-grid">{data.members.map((member) => <div className={`family-card theme-${member.themeKey}`} key={member.id}><Avatar name={member.displayName} theme={member.themeKey} large /><h2>{member.displayName}</h2><span>{member.kind.toLowerCase()}</span><label>Theme<select value={member.themeKey} disabled={busy} onChange={(event) => editMember(member.id, { themeKey: event.target.value })}><option value="sunny">Sunny</option><option value="space">Space</option><option value="ocean">Ocean</option></select></label>{member.kind === "CHILD" && <Link href={`/kid/${member.id}`}>Open Today view →</Link>}</div>)}</div>
-          <form className="panel form-stack narrow" onSubmit={(event) => submitSimple(event, "member")}><h2>Add household member</h2><label>Name<input name="displayName" required /></label><label>Member type<select name="kind"><option value="CHILD">Child</option><option value="ADULT">Adult</option><option value="OTHER">Other</option></select></label><label>Theme<select name="themeKey"><option value="sunny">Sunny</option><option value="space">Space</option><option value="ocean">Ocean</option></select></label><label className="inline-check"><input type="checkbox" name="canAdminister" /> Can administer schedules</label><button disabled={busy}>Add member</button></form>
+          <div className="family-grid">{data.members.map((member) => <div className={`family-card theme-${member.themeKey}`} key={member.id}><Avatar name={member.displayName} theme={member.themeKey} large /><h2>{member.displayName}</h2><span>{member.kind.toLowerCase()}</span><label>Theme<select value={member.themeKey} disabled={busy} onChange={(event) => editMember(member.id, { themeKey: event.target.value })}><ThemeOptions /></select></label>{member.kind === "CHILD" && <Link href={`/kid/${member.id}`}>Open Today view →</Link>}<button type="button" className="member-remove" disabled={busy} onClick={() => removeHouseholdMember(member.id, member.displayName)}>Remove member</button></div>)}</div>
+          <form className="panel form-stack narrow" onSubmit={(event) => submitSimple(event, "member")}><h2>Add household member</h2><label>Name<input name="displayName" required /></label><label>Member type<select name="kind"><option value="CHILD">Child</option><option value="ADULT">Adult</option><option value="OTHER">Other</option></select></label><label>Theme<select name="themeKey"><ThemeOptions /></select></label><label className="inline-check"><input type="checkbox" name="canAdminister" /> Can administer schedules</label><button disabled={busy}>Add member</button></form>
         </section>}
       </section>
 
@@ -296,6 +306,10 @@ function WeekBoard({ data, actorId, busy, toggleCompletion, patchOccurrence }: {
 
 function Avatar({ name, theme, large = false }: { name: string; theme: string; large?: boolean }) {
   return <span className={`avatar theme-${theme} ${large ? "large" : ""}`}>{name.slice(0, 1).toUpperCase()}</span>;
+}
+
+function ThemeOptions() {
+  return <>{THEME_OPTIONS.map(({ key, label }) => <option value={key} key={key}>{label}</option>)}</>;
 }
 
 function SetupScreen() {

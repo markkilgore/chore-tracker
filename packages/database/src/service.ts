@@ -407,6 +407,33 @@ export function updateMember(
   });
 }
 
+export function removeMember(memberId: string, db = getSqlite()): void {
+  withImmediateTransaction(db, () => {
+    const member = db.prepare(`
+      SELECT id, display_name FROM household_members WHERE id = ? AND active = 1
+    `).get(memberId) as Row | undefined;
+    if (!member) throw new Error("Household member not found");
+
+    const references = [
+      db.prepare(`SELECT 1 FROM responsibility_participants WHERE member_id = ? LIMIT 1`).get(memberId),
+      db.prepare(`SELECT 1 FROM occurrence_assignees WHERE member_id = ? LIMIT 1`).get(memberId),
+      db.prepare(`SELECT 1 FROM occurrence_eligible_members WHERE member_id = ? LIMIT 1`).get(memberId),
+      db.prepare(`SELECT 1 FROM weekly_plan_changes WHERE recorded_by_member_id = ? LIMIT 1`).get(memberId),
+      db.prepare(`
+        SELECT 1 FROM completions
+        WHERE completed_by_member_id = ? OR recorded_by_member_id = ? OR voided_by_member_id = ?
+        LIMIT 1
+      `).get(memberId, memberId, memberId),
+      db.prepare(`SELECT 1 FROM chart_exports WHERE member_id = ? LIMIT 1`).get(memberId)
+    ];
+    if (references.some(Boolean)) {
+      throw new Error(`${String(member.display_name)} has chore assignments or history, so Tidy Week must keep them. Only unused members can be removed.`);
+    }
+
+    db.prepare(`DELETE FROM household_members WHERE id = ?`).run(memberId);
+  });
+}
+
 export function createChore(
   householdId: string,
   input: { title: string; description?: string; kind: ChoreKind },

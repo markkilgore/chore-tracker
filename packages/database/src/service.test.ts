@@ -7,11 +7,13 @@ import {
   addOneOff,
   applyResponsibilityToWeek,
   completeOccurrence,
+  createMember,
   createChartExport,
   createResponsibility,
   getChartExport,
   getDashboard,
   materializeWeek,
+  removeMember,
   seedDemo,
   updateOccurrence,
   voidCompletion
@@ -103,6 +105,31 @@ describe("SQLite application model", () => {
     expect(chart.snapshot.chartId).toBe(chartId);
     expect(chart.checksum).toHaveLength(16);
     expect(chart.snapshot.rows.flatMap((row) => row.cells).some((cell) => cell.occurrenceId)).toBe(true);
+  });
+
+  it("removes an accidentally added member with no chore references", () => {
+    const dashboard = getDashboard(undefined, db)!;
+    const extraId = createMember(dashboard.household.id, {
+      displayName: "Extra person",
+      kind: "OTHER",
+      canAdminister: false,
+      themeKey: "cats"
+    }, db);
+
+    removeMember(extraId, db);
+
+    expect(db.prepare("SELECT id FROM household_members WHERE id = ?").get(extraId)).toBeUndefined();
+    expect(db.prepare("SELECT member_id FROM member_profiles WHERE member_id = ?").get(extraId)).toBeUndefined();
+  });
+
+  it("preserves members that already have assignments or history", () => {
+    const dashboard = getDashboard(undefined, db)!;
+    const assignedMember = dashboard.members.find((member) =>
+      dashboard.responsibilities.some((responsibility) => responsibility.participantIds.includes(member.id))
+    )!;
+
+    expect(() => removeMember(assignedMember.id, db)).toThrow(/assignments or history/);
+    expect(db.prepare("SELECT id FROM household_members WHERE id = ?").get(assignedMember.id)).toBeDefined();
   });
 
   it("uses WAL, foreign keys, and a healthy database", () => {
