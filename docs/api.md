@@ -48,7 +48,14 @@ Removes an accidentally added, unused member. The request is rejected when respo
 
 ### `PATCH /api/v1/responsibilities/:templateId`
 
-Ends a standing responsibility on a supplied date. Generated weeks are not rewritten.
+Actions:
+
+- `end` with `activeThrough`: ends the standing schedule without rewriting generated weeks.
+- `reassign` with `memberId` and `effectiveFrom`: converts the standing allocation to that fixed member and corrects uncompleted generated occurrences from the date forward. Completed chores and explicit week-level reassignments remain unchanged.
+
+### `DELETE /api/v1/responsibilities/:templateId`
+
+Deletes a responsibility created in error and removes its unused generated occurrences. The request is rejected when completions, issued charts, replacements, or successor templates depend on it. Affected weekly-plan revisions are incremented.
 
 ## Weekly editing
 

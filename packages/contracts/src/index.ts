@@ -36,6 +36,11 @@ export const createResponsibilitySchema = z.object({
   expectedRevision: z.number().int().nonnegative().optional()
 });
 
+export const responsibilityActionSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("end"), activeThrough: isoDateSchema }),
+  z.object({ action: z.literal("reassign"), memberId: z.string().uuid(), effectiveFrom: isoDateSchema })
+]);
+
 export const occurrenceActionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("cancel"), expectedRevision: z.number().int().nonnegative() }),
   z.object({ action: z.literal("restore"), expectedRevision: z.number().int().nonnegative() }),

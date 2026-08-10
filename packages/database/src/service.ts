@@ -467,6 +467,153 @@ export function endResponsibility(templateId: string, activeThrough: ISODate, db
   db.prepare(`UPDATE responsibility_templates SET active_through = ? WHERE id = ?`).run(activeThrough, templateId);
 }
 
+export function reassignResponsibility(
+  templateId: string,
+  memberId: string,
+  effectiveFrom: ISODate,
+  db = getSqlite()
+): { updatedOccurrenceCount: number; updatedPlanCount: number } {
+  let updatedOccurrenceCount = 0;
+  let updatedPlanCount = 0;
+  withImmediateTransaction(db, () => {
+    const template = db.prepare(`
+      SELECT household_id, allocation_kind, active_from, active_through
+      FROM responsibility_templates WHERE id = ?
+    `).get(templateId) as Row | undefined;
+    if (!template) throw new Error("Responsibility not found");
+    if (template.active_through != null && String(template.active_through) < effectiveFrom) {
+      throw new Error("This responsibility ended before the selected effective date");
+    }
+    const member = db.prepare(`
+      SELECT household_id, active FROM household_members WHERE id = ?
+    `).get(memberId) as Row | undefined;
+    if (!member || !member.active || member.household_id !== template.household_id) {
+      throw new Error("New assignee must be an active member of this household");
+    }
+
+    const previousParticipants = (db.prepare(`
+      SELECT member_id FROM responsibility_participants WHERE template_id = ? ORDER BY position
+    `).all(templateId) as Row[]).map((row) => String(row.member_id));
+    const previousAllocation = {
+      kind: String(template.allocation_kind),
+      participantIds: previousParticipants
+    };
+
+    db.prepare(`DELETE FROM responsibility_participants WHERE template_id = ?`).run(templateId);
+    db.prepare(`
+      INSERT INTO responsibility_participants(template_id, member_id, position) VALUES (?, ?, 0)
+    `).run(templateId, memberId);
+    db.prepare(`
+      UPDATE responsibility_templates SET allocation_kind = 'fixed', rotation_offset = 0 WHERE id = ?
+    `).run(templateId);
+
+    const occurrences = db.prepare(`
+      SELECT o.id, o.weekly_plan_id, a.member_id AS assignee_id,
+             (SELECT GROUP_CONCAT(e.member_id) FROM occurrence_eligible_members e WHERE e.occurrence_id = o.id) AS eligible_member_ids
+      FROM chore_occurrences o
+      LEFT JOIN occurrence_assignees a ON a.occurrence_id = o.id
+      WHERE o.source_template_id = ? AND o.due_date >= ?
+        AND NOT EXISTS (SELECT 1 FROM completions c WHERE c.occurrence_id = o.id AND c.voided_at IS NULL)
+        AND NOT EXISTS (SELECT 1 FROM weekly_plan_changes w WHERE w.occurrence_id = o.id AND w.action = 'REASSIGN')
+      ORDER BY o.due_date, o.id
+    `).all(templateId, effectiveFrom) as Row[];
+    const affectedPlans = new Set<string>();
+    for (const occurrence of occurrences) {
+      const currentAssigneeId = occurrence.assignee_id == null ? null : String(occurrence.assignee_id);
+      const eligibleMemberIds = occurrence.eligible_member_ids == null || String(occurrence.eligible_member_ids) === ""
+        ? []
+        : String(occurrence.eligible_member_ids).split(",");
+      if (currentAssigneeId === memberId && eligibleMemberIds.length === 0) continue;
+
+      const occurrenceId = String(occurrence.id);
+      const planId = String(occurrence.weekly_plan_id);
+      db.prepare(`DELETE FROM occurrence_assignees WHERE occurrence_id = ?`).run(occurrenceId);
+      db.prepare(`DELETE FROM occurrence_eligible_members WHERE occurrence_id = ?`).run(occurrenceId);
+      db.prepare(`INSERT INTO occurrence_assignees(occurrence_id, member_id) VALUES (?, ?)`)
+        .run(occurrenceId, memberId);
+      db.prepare(`
+        INSERT INTO weekly_plan_changes(id, weekly_plan_id, occurrence_id, action, before_json, after_json, created_at)
+        VALUES (?, ?, ?, 'REASSIGN_RESPONSIBILITY', ?, ?, ?)
+      `).run(
+        id(),
+        planId,
+        occurrenceId,
+        JSON.stringify({ allocation: previousAllocation, assigneeId: currentAssigneeId, eligibleMemberIds }),
+        JSON.stringify({ allocation: { kind: "fixed", participantIds: [memberId] }, assigneeId: memberId }),
+        now()
+      );
+      affectedPlans.add(planId);
+      updatedOccurrenceCount += 1;
+    }
+    for (const planId of affectedPlans) {
+      db.prepare(`UPDATE weekly_plans SET revision = revision + 1, updated_at = ? WHERE id = ?`)
+        .run(now(), planId);
+    }
+    updatedPlanCount = affectedPlans.size;
+  });
+  return { updatedOccurrenceCount, updatedPlanCount };
+}
+
+export function deleteResponsibility(
+  templateId: string,
+  db = getSqlite()
+): { deletedOccurrenceCount: number; updatedPlanCount: number } {
+  let deletedOccurrenceCount = 0;
+  let updatedPlanCount = 0;
+  withImmediateTransaction(db, () => {
+    const template = db.prepare(`SELECT id FROM responsibility_templates WHERE id = ?`).get(templateId);
+    if (!template) throw new Error("Responsibility not found");
+    const hasCompletions = db.prepare(`
+      SELECT 1 FROM completions c JOIN chore_occurrences o ON o.id = c.occurrence_id
+      WHERE o.source_template_id = ? LIMIT 1
+    `).get(templateId);
+    if (hasCompletions) {
+      throw new Error("This responsibility has completion history and cannot be deleted. End it instead.");
+    }
+    const hasIssuedChart = db.prepare(`
+      SELECT 1 FROM chart_exports x
+      WHERE x.weekly_plan_id IN (
+        SELECT DISTINCT weekly_plan_id FROM chore_occurrences WHERE source_template_id = ?
+      ) LIMIT 1
+    `).get(templateId);
+    if (hasIssuedChart) {
+      throw new Error("A chart was already issued for a week containing this responsibility. End it instead.");
+    }
+    const hasReplacement = db.prepare(`
+      SELECT 1 FROM chore_occurrences
+      WHERE replaces_occurrence_id IN (SELECT id FROM chore_occurrences WHERE source_template_id = ?)
+      LIMIT 1
+    `).get(templateId);
+    const hasSuccessor = db.prepare(`
+      SELECT 1 FROM responsibility_templates WHERE supersedes_template_id = ? LIMIT 1
+    `).get(templateId);
+    if (hasReplacement || hasSuccessor) {
+      throw new Error("This responsibility has replacement history and cannot be deleted. End it instead.");
+    }
+
+    const occurrences = db.prepare(`
+      SELECT id, weekly_plan_id FROM chore_occurrences WHERE source_template_id = ?
+    `).all(templateId) as Row[];
+    const affectedPlans = new Set(occurrences.map((row) => String(row.weekly_plan_id)));
+    for (const occurrence of occurrences) {
+      db.prepare(`DELETE FROM weekly_plan_changes WHERE occurrence_id = ?`).run(occurrence.id);
+      db.prepare(`DELETE FROM chore_occurrences WHERE id = ?`).run(occurrence.id);
+    }
+    db.prepare(`
+      DELETE FROM weekly_plan_changes
+      WHERE action = 'APPLY_NEW_RESPONSIBILITY' AND json_extract(after_json, '$.templateId') = ?
+    `).run(templateId);
+    db.prepare(`DELETE FROM responsibility_templates WHERE id = ?`).run(templateId);
+    for (const planId of affectedPlans) {
+      db.prepare(`UPDATE weekly_plans SET revision = revision + 1, updated_at = ? WHERE id = ?`)
+        .run(now(), planId);
+    }
+    deletedOccurrenceCount = occurrences.length;
+    updatedPlanCount = affectedPlans.size;
+  });
+  return { deletedOccurrenceCount, updatedPlanCount };
+}
+
 export function createResponsibility(
   householdId: string,
   input: {

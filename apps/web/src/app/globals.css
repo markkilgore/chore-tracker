@@ -142,7 +142,7 @@ legend { color: var(--muted); font-size: 12px; font-weight: 800; margin-bottom: 
 .responsibility-form > small { color: var(--muted); }
 .standing-panel { margin-top: 20px; }
 .standing-list { display: grid; margin-top: 18px; }
-.standing-list article { min-height: 58px; display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; align-items: center; gap: 14px; padding: 10px 0; border-top: 1px solid var(--line); }
+.standing-list article { min-height: 70px; display: grid; grid-template-columns: 1.2fr .8fr .9fr minmax(220px, 1fr); align-items: center; gap: 14px; padding: 10px 0; border-top: 1px solid var(--line); }
 .standing-list article.ended { opacity: .52; }
 .standing-list article > div:first-child { display: flex; flex-direction: column; }
 .standing-list article span, .standing-list article small { color: var(--muted); font-size: 11px; }
@@ -150,6 +150,10 @@ legend { color: var(--muted); font-size: 12px; font-weight: 800; margin-bottom: 
 .day-pills i { font-style: normal; font-size: 8px; font-weight: 900; padding: 5px; border-radius: 5px; background: var(--mint); color: var(--green); }
 .danger-link { background: transparent; color: #9b5548; padding: 5px; font-size: 10px; }
 .danger-link:hover { background: #f7e2dc; }
+.responsibility-actions { display: grid; gap: 4px; justify-items: end; }
+.responsibility-actions > div { display: flex; gap: 5px; }
+.standing-reassign { width: 100%; display: grid; grid-template-columns: minmax(100px, 1fr) auto; gap: 5px; }
+.standing-reassign select, .standing-reassign button { padding: 6px 7px; font-size: 10px; }
 .family-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 20px; }
 .family-card { --card-ornament: ""; --card-accent: #d77a42; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; text-align: center; padding: 27px 18px 20px; box-shadow: var(--shadow); position: relative; overflow: hidden; }
 .family-card:after { content: var(--card-ornament); position: absolute; right: -7px; top: 2px; color: color-mix(in srgb, var(--card-accent) 18%, transparent); font: 900 25px Georgia, serif; transform: rotate(10deg); }

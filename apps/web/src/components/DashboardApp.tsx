@@ -125,6 +125,23 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
     }));
   }
 
+  async function reassignStandingResponsibility(event: FormEvent<HTMLFormElement>, templateId: string, choreTitle: string) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const memberId = String(form.get("memberId"));
+    const memberName = data!.members.find((member) => member.id === memberId)?.displayName ?? "that member";
+    if (!window.confirm(`Assign ${choreTitle} to ${memberName} from the selected week forward? Uncompleted generated chores will be corrected too.`)) return;
+    await act(() => api(`/api/v1/responsibilities/${templateId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ action: "reassign", memberId, effectiveFrom: data!.week.weekStartDate })
+    }));
+  }
+
+  async function deleteStandingResponsibility(templateId: string, choreTitle: string) {
+    if (!window.confirm(`Delete the ${choreTitle} standing responsibility? Its unused generated chores will also be removed. Completed or printed history will be protected.`)) return;
+    await act(() => api(`/api/v1/responsibilities/${templateId}`, { method: "DELETE" }));
+  }
+
   async function submitResponsibility(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -259,7 +276,28 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
             <button disabled={busy}>Create recurring responsibility</button>
             <small>Future ungenerated weeks use the standing schedule automatically.</small>
           </form>
-          <section className="panel standing-panel"><div><p className="eyebrow">ACTIVE & HISTORICAL</p><h2>Standing responsibilities</h2></div><div className="standing-list">{data.responsibilities.map((responsibility) => <article className={responsibility.activeThrough ? "ended" : ""} key={responsibility.id}><div><strong>{responsibility.choreTitle}</strong><span>{responsibility.routineName ?? "Any time"} · {responsibility.allocationKind}</span></div><div className="day-pills">{responsibility.weekdays.map((day) => <i key={day}>{WEEKDAY_LABELS[day]}</i>)}</div><span>{responsibility.participantIds.map((memberId) => memberById.get(memberId)?.displayName).filter(Boolean).join(" → ") || "Any eligible member"}</span>{responsibility.activeThrough ? <small>Ended {responsibility.activeThrough}</small> : <button className="danger-link" disabled={busy} onClick={() => stopResponsibility(responsibility.id, responsibility.activeFrom)}>Stop after this week</button>}</article>)}</div></section>
+          <section className="panel standing-panel">
+            <div><p className="eyebrow">ACTIVE & HISTORICAL</p><h2>Standing responsibilities</h2></div>
+            <div className="standing-list">{data.responsibilities.map((responsibility) => <article className={responsibility.activeThrough ? "ended" : ""} key={responsibility.id}>
+              <div><strong>{responsibility.choreTitle}</strong><span>{responsibility.routineName ?? "Any time"} · {responsibility.allocationKind}</span></div>
+              <div className="day-pills">{responsibility.weekdays.map((day) => <i key={day}>{WEEKDAY_LABELS[day]}</i>)}</div>
+              <span>{responsibility.participantIds.map((memberId) => memberById.get(memberId)?.displayName).filter(Boolean).join(" → ") || "Any eligible member"}</span>
+              <div className="responsibility-actions">
+                {responsibility.activeThrough
+                  ? <small>Ended {responsibility.activeThrough}</small>
+                  : <form className="standing-reassign" onSubmit={(event) => reassignStandingResponsibility(event, responsibility.id, responsibility.choreTitle)}>
+                    <select name="memberId" aria-label={`New assignee for ${responsibility.choreTitle}`} defaultValue={responsibility.allocationKind === "fixed" ? responsibility.participantIds[0] : responsibility.participantIds[0] ?? data.members[0]?.id}>
+                      {data.members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}
+                    </select>
+                    <button disabled={busy}>Assign forward</button>
+                  </form>}
+                <div>
+                  {!responsibility.activeThrough && <button className="danger-link" disabled={busy} onClick={() => stopResponsibility(responsibility.id, responsibility.activeFrom)}>Stop</button>}
+                  <button className="danger-link" disabled={busy} onClick={() => deleteStandingResponsibility(responsibility.id, responsibility.choreTitle)}>Delete</button>
+                </div>
+              </div>
+            </article>)}</div>
+          </section>
         </section>}
 
         {tab === "family" && <section className="manage-page">

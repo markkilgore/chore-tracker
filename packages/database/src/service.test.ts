@@ -10,9 +10,11 @@ import {
   createMember,
   createChartExport,
   createResponsibility,
+  deleteResponsibility,
   getChartExport,
   getDashboard,
   materializeWeek,
+  reassignResponsibility,
   removeMember,
   seedDemo,
   updateOccurrence,
@@ -73,6 +75,80 @@ describe("SQLite application model", () => {
     const applied = applyResponsibilityToWeek(templateId, dashboard.week.id, dashboard.week.revision, db);
     expect(applied.revision).toBe(dashboard.week.revision + 1);
     expect(applied.occurrences.find((item) => item.sourceTemplateId === templateId)?.origin).toBe("OVERRIDE");
+  });
+
+  it("reassigns a standing responsibility and its uncompleted generated chores forward", () => {
+    const dashboard = getDashboard(undefined, db)!;
+    const [firstMember, secondMember] = dashboard.members;
+    const templateId = createResponsibility(dashboard.household.id, {
+      choreDefinitionId: dashboard.chores[0].id,
+      routineId: dashboard.routines[0].id,
+      activeFrom: dashboard.week.weekStartDate,
+      weekdays: [0, 1],
+      intervalWeeks: 1,
+      allocation: { kind: "open", eligibleMemberIds: [firstMember.id, secondMember.id] }
+    }, db);
+    const applied = applyResponsibilityToWeek(templateId, dashboard.week.id, dashboard.week.revision, db);
+    const generated = applied.occurrences.filter((item) => item.sourceTemplateId === templateId);
+    completeOccurrence(generated[0].id, firstMember.id, firstMember.id, db);
+
+    const result = reassignResponsibility(templateId, secondMember.id, dashboard.week.weekStartDate, db);
+    const corrected = getDashboard(undefined, db)!;
+    const responsibility = corrected.responsibilities.find((item) => item.id === templateId)!;
+    const occurrences = corrected.week.occurrences.filter((item) => item.sourceTemplateId === templateId);
+
+    expect(result).toEqual({ updatedOccurrenceCount: 1, updatedPlanCount: 1 });
+    expect(responsibility.allocationKind).toBe("fixed");
+    expect(responsibility.participantIds).toEqual([secondMember.id]);
+    expect(occurrences.find((item) => item.id === generated[0].id)?.assigneeId).toBeNull();
+    expect(occurrences.find((item) => item.id === generated[1].id)?.assigneeId).toBe(secondMember.id);
+    expect(corrected.week.revision).toBe(applied.revision + 1);
+  });
+
+  it("deletes an erroneous responsibility and its unused generated chores", () => {
+    const dashboard = getDashboard(undefined, db)!;
+    const templateId = createResponsibility(dashboard.household.id, {
+      choreDefinitionId: dashboard.chores[0].id,
+      routineId: dashboard.routines[0].id,
+      activeFrom: dashboard.week.weekStartDate,
+      weekdays: [3],
+      intervalWeeks: 1,
+      allocation: { kind: "fixed", memberId: dashboard.members[0].id }
+    }, db);
+    const applied = applyResponsibilityToWeek(templateId, dashboard.week.id, dashboard.week.revision, db);
+
+    expect(deleteResponsibility(templateId, db)).toEqual({ deletedOccurrenceCount: 1, updatedPlanCount: 1 });
+    expect(db.prepare("SELECT id FROM responsibility_templates WHERE id = ?").get(templateId)).toBeUndefined();
+    expect(db.prepare("SELECT id FROM chore_occurrences WHERE source_template_id = ?").all(templateId)).toHaveLength(0);
+    expect(getDashboard(undefined, db)!.week.revision).toBe(applied.revision + 1);
+  });
+
+  it("protects completed or printed responsibility history from deletion", () => {
+    const dashboard = getDashboard(undefined, db)!;
+    const completedTemplateId = createResponsibility(dashboard.household.id, {
+      choreDefinitionId: dashboard.chores[0].id,
+      activeFrom: dashboard.week.weekStartDate,
+      weekdays: [4],
+      intervalWeeks: 1,
+      allocation: { kind: "fixed", memberId: dashboard.members[0].id }
+    }, db);
+    const applied = applyResponsibilityToWeek(completedTemplateId, dashboard.week.id, dashboard.week.revision, db);
+    const occurrence = applied.occurrences.find((item) => item.sourceTemplateId === completedTemplateId)!;
+    completeOccurrence(occurrence.id, dashboard.members[0].id, dashboard.members[0].id, db);
+    expect(() => deleteResponsibility(completedTemplateId, db)).toThrow(/completion history/);
+
+    const printedTemplateId = createResponsibility(dashboard.household.id, {
+      choreDefinitionId: dashboard.chores[1].id,
+      activeFrom: dashboard.week.weekStartDate,
+      weekdays: [5],
+      intervalWeeks: 1,
+      allocation: { kind: "fixed", memberId: dashboard.members[1].id }
+    }, db);
+    const current = getDashboard(undefined, db)!;
+    applyResponsibilityToWeek(printedTemplateId, current.week.id, current.week.revision, db);
+    const afterApply = getDashboard(undefined, db)!;
+    createChartExport(afterApply.week.id, dashboard.members[1].id, undefined, db);
+    expect(() => deleteResponsibility(printedTemplateId, db)).toThrow(/chart was already issued/);
   });
 
   it("keeps completion corrections instead of deleting history", () => {

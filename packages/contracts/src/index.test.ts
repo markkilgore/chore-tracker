@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chartExportSchema, createMemberSchema, themeKeySchema, updateMemberSchema } from "./index";
+import { chartExportSchema, createMemberSchema, responsibilityActionSchema, themeKeySchema, updateMemberSchema } from "./index";
 
 describe("theme contracts", () => {
   it.each(["sunny", "space", "ocean", "italy", "cats", "shark"])("accepts the %s theme", (themeKey) => {
@@ -15,5 +15,19 @@ describe("theme contracts", () => {
 
   it("rejects unknown themes", () => {
     expect(() => themeKeySchema.parse("mystery")).toThrow();
+  });
+});
+
+describe("standing responsibility actions", () => {
+  it("validates forward reassignment", () => {
+    expect(responsibilityActionSchema.parse({
+      action: "reassign",
+      memberId: "22222222-2222-4222-8222-222222222222",
+      effectiveFrom: "2026-08-09"
+    })).toEqual({
+      action: "reassign",
+      memberId: "22222222-2222-4222-8222-222222222222",
+      effectiveFrom: "2026-08-09"
+    });
   });
 });
