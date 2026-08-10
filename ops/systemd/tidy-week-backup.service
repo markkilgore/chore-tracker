@@ -1,0 +1,13 @@
+[Unit]
+Description=Back up Tidy Week SQLite data
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=__TIDY_USER__
+Group=__TIDY_GROUP__
+WorkingDirectory=__TIDY_REPO__
+ExecStart=__TIDY_REPO__/ops/backup/backup.sh
+
+[Install]
+WantedBy=multi-user.target

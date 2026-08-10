@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Tidy Week backup daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=15m
+Unit=tidy-week-backup.service
+
+[Install]
+WantedBy=timers.target

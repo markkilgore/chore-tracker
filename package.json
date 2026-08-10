@@ -1,0 +1,45 @@
+{
+  "name": "family-chore-tracker",
+  "type": "module",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @chore-tracker/web",
+    "build": "npm run build -w @chore-tracker/web",
+    "start": "npm run start -w @chore-tracker/web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "db:migrate": "node --import tsx packages/database/src/cli.ts migrate",
+    "db:seed": "node --import tsx packages/database/src/cli.ts seed",
+    "db:check": "node --import tsx packages/database/src/cli.ts check",
+    "db:backup": "node --import tsx packages/database/src/cli.ts backup"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.2",
+    "next": "^16.3.0",
+    "playwright": "^1.62.1",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.2.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "tsx": "^4.23.11",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
