@@ -67,6 +67,7 @@ p { color: var(--muted); }
 .avatar.theme-italy, .theme-italy .avatar { background: #238153; color: white; }
 .avatar.theme-cats, .theme-cats .avatar { background: #d8783e; color: white; }
 .avatar.theme-shark, .theme-shark .avatar { background: #397993; color: white; }
+.avatar.theme-shark-dino, .theme-shark-dino .avatar { background: #287f91; color: white; }
 .avatar.large { width: 72px; height: 72px; font-size: 27px; border-width: 4px; }
 .section-heading { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 15px; }
 .section-heading h2 { font-size: 31px; }
@@ -168,6 +169,7 @@ legend { color: var(--muted); font-size: 12px; font-weight: 800; margin-bottom: 
 .family-card.theme-italy { --card-accent: #238153; --card-ornament: "ITALIA"; background: linear-gradient(135deg, #e5f2e8, #fffdf8 48%, #f7e4e2); }
 .family-card.theme-cats { --card-accent: #d8783e; --card-ornament: "=^·^="; background: #fff0df; }
 .family-card.theme-shark { --card-accent: #397993; --card-ornament: "▲"; background: #e4f0f4; }
+.family-card.theme-shark-dino { --card-accent: #287f91; --card-ornament: "≈ ▲"; background: linear-gradient(145deg, #def1ef, #edf5e2); }
 .member-remove { margin-top: 13px; padding: 5px 8px; background: transparent; color: #9b5548; font-size: 10px; }
 .member-remove:hover { background: #f7e2dc; }
 .panel.narrow { max-width: 520px; }
@@ -201,6 +203,7 @@ legend { color: var(--muted); font-size: 12px; font-weight: 800; margin-bottom: 
 .kid-page.theme-italy { --kid-accent: #238153; --kid-ornament: "ITALIA"; background: linear-gradient(110deg, #e9f5ec 0 30%, #fffaf2 30% 70%, #fae9e7 70%); }
 .kid-page.theme-cats { --kid-accent: #d8783e; --kid-ornament: "=^·^="; background: #fff0df; }
 .kid-page.theme-shark { --kid-accent: #397993; --kid-ornament: "▲"; background: linear-gradient(#dcebf1, #eef5f6); }
+.kid-page.theme-shark-dino { --kid-accent: #287f91; --kid-ornament: "≈ ▲"; background: linear-gradient(#dff1ef, #eef5e5); }
 .kid-page:before, .kid-page:after { position: fixed; border-radius: 50%; background: color-mix(in srgb, var(--kid-accent) 17%, transparent); z-index: 0; }
 .kid-page:before { content: var(--kid-ornament); width: 330px; height: 330px; right: -130px; top: -120px; display: grid; place-items: center; color: color-mix(in srgb, var(--kid-accent) 38%, transparent); font: 900 52px Georgia, serif; padding: 75px 100px 0 0; }
 .kid-page:after { content: ""; width: 210px; height: 210px; left: -100px; bottom: -70px; }

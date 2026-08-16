@@ -1,42 +1,51 @@
 import type { ChartSnapshot } from "@chore-tracker/database";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import QRCode from "qrcode";
 
 export const PRINT_CSS = `
   @page { size: Letter portrait; margin: 0; }
   * { box-sizing: border-box; }
-  body { margin: 0; color: #25332f; background: #e9e7e0; font-family: Arial, sans-serif; }
-  .chart-page { width: 8.5in; min-height: 11in; margin: 20px auto; padding: .5in; background: #fffdf8; position: relative; overflow: hidden; page-break-after: always; }
+  body { margin: 0; color: #25332f; background: #e9e7e0; font-family: "Trebuchet MS", Arial, sans-serif; }
+  .chart-page { --accent: #d77a42; --soft: #f8e2c9; --row: #fff9f1; --ornament: "☀"; width: 8.5in; min-height: 11in; margin: 20px auto; padding: .5in; background: #fffdf8; position: relative; overflow: hidden; page-break-after: always; box-shadow: inset 0 .07in 0 var(--accent); }
   .chart-page:last-child { page-break-after: auto; }
   .chart-page:before { content: ""; position: absolute; width: 2.1in; height: 2.1in; border-radius: 50%; right: -.75in; top: -.85in; background: var(--soft); }
   .chart-page:after { content: var(--ornament); position: absolute; right: .55in; top: .28in; font: bold 36px Georgia, serif; color: var(--accent); transform: rotate(9deg); }
-  .theme-sunny { --accent: #d77a42; --soft: #f8e2c9; --ornament: "☀"; }
-  .theme-space { --accent: #6257a4; --soft: #e5e1f3; --ornament: "★"; }
-  .theme-ocean { --accent: #288da1; --soft: #d7edf0; --ornament: "≈"; }
-  .theme-italy { --accent: #238153; --soft: #e3f0e5; --ornament: "ITALIA"; }
+  .chart-page.has-art:before, .chart-page.has-art:after { display: none; }
+  .theme-sunny { --accent: #d77a42; --soft: #f8e2c9; --row: #fff9f1; --ornament: "☀"; }
+  .theme-space { --accent: #6257a4; --soft: #e5e1f3; --row: #f8f6fc; --ornament: "★"; }
+  .theme-ocean { --accent: #288da1; --soft: #d7edf0; --row: #f3faf9; --ornament: "≈"; }
+  .theme-italy { --accent: #238153; --soft: #e3f0e5; --row: #f7faf4; --ornament: "ITALIA"; }
   .theme-italy.chart-page:before { background: linear-gradient(90deg, #238153 0 33%, #fffdf8 33% 66%, #c84b4b 66%); opacity: .88; }
-  .theme-cats { --accent: #c76d35; --soft: #fbe5cf; --ornament: "=^·^="; }
-  .theme-shark { --accent: #397993; --soft: #dcebf0; --ornament: "▲"; }
-  .chart-header { display: flex; justify-content: space-between; align-items: flex-start; min-height: 1.35in; position: relative; z-index: 1; }
+  .theme-cats { --accent: #ba6042; --soft: #f7dfd2; --row: #fff8f2; --ornament: "=^·^="; }
+  .theme-shark { --accent: #397993; --soft: #dcebf0; --row: #f3f9fa; --ornament: "▲"; }
+  .theme-shark-dino { --accent: #287f91; --soft: #dceee9; --row: #f2f9f5; --ornament: "≈ ▲"; }
+  .chart-header { height: 1.35in; min-height: 1.35in; padding: .12in; position: relative; z-index: 1; overflow: hidden; border: 1px solid var(--soft); border-bottom: 0; border-radius: 14px 14px 0 0; background: #fffaf4; }
+  .theme-shark-dino .chart-header { background: #eff8f4; }
+  .header-copy { width: 4.05in; position: relative; z-index: 2; }
+  .theme-art { position: absolute; z-index: 1; top: 0; right: 1.04in; width: 2.45in; height: 1.35in; object-fit: contain; object-position: right center; mix-blend-mode: multiply; }
   .kicker { color: var(--accent); letter-spacing: .16em; font-size: 9px; font-weight: 900; text-transform: uppercase; margin: 0 0 6px; }
-  h1 { font: bold 34px Georgia, serif; margin: 0; letter-spacing: -.5px; }
-  .week-label { color: #68746f; margin: 7px 0 0; font-size: 13px; }
-  .chart-meta { display: flex; align-items: center; gap: 9px; padding-right: .47in; }
-  .chart-meta img { width: .62in; height: .62in; }
-  .chart-meta div { font-size: 8px; color: #68746f; line-height: 1.45; }
-  .chart-meta strong { display: block; color: #25332f; font-size: 10px; }
-  table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; border: 1.5px solid #c9cbc5; border-radius: 9px; overflow: hidden; }
+  h1 { font: bold 31px Georgia, serif; margin: 0; letter-spacing: -.5px; line-height: 1.02; }
+  .week-label { display: inline-block; color: #52615b; margin: 7px 0 0; padding: 3px 8px; border-radius: 999px; background: rgba(255,255,255,.86); border: 1px solid var(--soft); font-size: 11px; font-weight: 700; }
+  .chart-meta { position: absolute; z-index: 3; top: .11in; right: .09in; width: .9in; min-height: 1.08in; padding: .06in; display: flex; flex-direction: column; align-items: center; gap: 3px; text-align: center; border: 1px solid var(--soft); border-radius: 10px; background: rgba(255,255,255,.96); }
+  .chart-meta img { width: .53in; height: .53in; }
+  .chart-meta div { font-size: 6px; color: #68746f; line-height: 1.25; }
+  .chart-meta strong { display: block; color: #25332f; font-size: 7px; }
+  table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: fixed; border: 1.5px solid #bfc5c0; border-radius: 0 0 12px 12px; overflow: hidden; }
   th, td { border-right: 1px solid #d8d9d3; border-bottom: 1px solid #d8d9d3; }
   th:last-child, td:last-child { border-right: 0; }
   tbody tr:last-child td { border-bottom: 0; }
-  thead th { height: .48in; background: var(--soft); color: #3f4c47; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
+  thead th { height: .48in; background: var(--soft); color: #34463f; font-size: 9px; text-transform: uppercase; letter-spacing: .06em; }
   thead th:first-child { text-align: left; padding-left: 12px; width: 2.52in; }
   tbody td { height: .42in; text-align: center; }
-  .chore-name { text-align: left; padding: 0 11px; }
-  .chore-name strong { display: block; font-size: 11px; }
-  .chore-name small { color: #7d8782; font-size: 7px; text-transform: uppercase; letter-spacing: .08em; }
-  .box { width: .22in; height: .22in; border: 1.7px solid #6f7b76; border-radius: 3px; margin: auto; display: grid; place-items: center; color: var(--accent); font-weight: 900; font-size: 14px; line-height: 1; }
+  tbody tr:nth-child(even) td { background: var(--row); }
+  .chore-name { text-align: left; padding: 0 10px; border-left: 4px solid color-mix(in srgb, var(--accent) 65%, white); }
+  .chore-name strong { display: block; font-size: 11px; line-height: 1.15; }
+  .chore-name small { display: inline-block; margin-top: 2px; padding: 1px 5px; border-radius: 999px; background: var(--soft); color: #596660; font-size: 6.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+  .box { width: .22in; height: .22in; border: 2px solid #596963; border-radius: 4px; margin: auto; display: grid; place-items: center; background: white; color: var(--accent); box-shadow: inset 0 0 0 1px rgba(255,255,255,.9); font-weight: 900; font-size: 14px; line-height: 1; }
+  .theme-cats .box { border-radius: 6px; }
   .empty { color: #c7cbc8; font-size: 12px; }
-  .page-footer { position: absolute; bottom: .3in; left: .5in; right: .5in; display: flex; justify-content: space-between; color: #88908d; font-size: 7px; letter-spacing: .06em; }
+  .page-footer { position: absolute; bottom: .3in; left: .5in; right: .5in; padding-top: 5px; border-top: 1px solid var(--soft); display: flex; justify-content: space-between; color: #76817c; font-size: 7px; letter-spacing: .06em; }
   .corner-marker { position: absolute; width: 7px; height: 7px; background: #252525; }
   .corner-marker.tl { left: .18in; top: .18in; } .corner-marker.tr { right: .18in; top: .18in; }
   .corner-marker.bl { left: .18in; bottom: .18in; } .corner-marker.br { right: .18in; bottom: .18in; }
@@ -44,6 +53,32 @@ export const PRINT_CSS = `
   .download-bar a { color: white; background: #2e795f; border-radius: 9px; text-decoration: none; font-weight: bold; padding: 10px 15px; }
   @media print { body { background: white; } .chart-page { margin: 0; } .download-bar { display: none; } }
 `;
+
+const THEME_ART_FILES: Record<string, string> = {
+  cats: "cats.webp",
+  "shark-dino": "shark-dino.webp"
+};
+
+const THEME_KICKERS: Record<string, string> = {
+  cats: "PAWS, CHECKS & PROUD MOMENTS",
+  "shark-dino": "THE PREHISTORIC OCEAN CREW"
+};
+
+async function themeArtworkDataUrl(themeKey: string): Promise<string | null> {
+  const filename = THEME_ART_FILES[themeKey];
+  if (!filename) return null;
+  try {
+    const artwork = await readFile(path.join(process.cwd(), "apps/web/public/chart-art", filename));
+    return `data:image/webp;base64,${artwork.toString("base64")}`;
+  } catch {
+    try {
+      const artwork = await readFile(path.join(process.cwd(), "public/chart-art", filename));
+      return `data:image/webp;base64,${artwork.toString("base64")}`;
+    } catch {
+      return null;
+    }
+  }
+}
 
 function escape(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
@@ -56,14 +91,16 @@ function prettyWeek(date: string): string {
 
 export async function renderChartHtml(snapshot: ChartSnapshot, checksum: string, includeToolbar = false): Promise<string> {
   const qr = await QRCode.toDataURL(`chorechart:v1:${snapshot.chartId}:${checksum}`, { margin: 0, width: 128, errorCorrectionLevel: "M" });
+  const themeArtwork = await themeArtworkDataUrl(snapshot.themeKey);
   const pages = Array.from({ length: Math.max(1, Math.ceil(snapshot.rows.length / 18)) }, (_, index) =>
     snapshot.rows.slice(index * 18, index * 18 + 18)
   );
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  const content = pages.map((rows, pageIndex) => `<section class="chart-page theme-${escape(snapshot.themeKey)}">
+  const content = pages.map((rows, pageIndex) => `<section class="chart-page theme-${escape(snapshot.themeKey)}${themeArtwork ? " has-art" : ""}">
     <i class="corner-marker tl"></i><i class="corner-marker tr"></i><i class="corner-marker bl"></i><i class="corner-marker br"></i>
     <header class="chart-header">
-      <div><p class="kicker">MY TIDY WEEK</p><h1>${escape(snapshot.memberName)}’s Chore Chart</h1><p class="week-label">Week of ${prettyWeek(snapshot.weekStartDate)}</p></div>
+      ${themeArtwork ? `<img class="theme-art" src="${themeArtwork}" alt="" />` : ""}
+      <div class="header-copy"><p class="kicker">${escape(THEME_KICKERS[snapshot.themeKey] ?? "MY TIDY WEEK")}</p><h1>${escape(snapshot.memberName)}’s Chore Chart</h1><p class="week-label">Week of ${prettyWeek(snapshot.weekStartDate)}</p></div>
       <div class="chart-meta"><img src="${qr}" alt="Chart QR code" /><div><strong>Chart ${escape(snapshot.chartId.slice(0, 8))}</strong>Keep this code visible<br/>when photographing</div></div>
     </header>
     <table><thead><tr><th>Chore</th>${dayLabels.map((day) => `<th>${day}</th>`).join("")}</tr></thead><tbody>

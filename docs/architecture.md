@@ -77,7 +77,7 @@ SQLite uses WAL mode, foreign keys, a five-second busy timeout, short `BEGIN IMM
 
 ## PDF and future scanning
 
-Chart issuance stores labels, applicable cells, theme/layout versions, plan revision, checksum, and deterministic checkbox geometry. Playwright drives pinned Chromium to render explicit Letter-sized HTML/CSS.
+Chart issuance stores labels, applicable cells, theme/layout versions, plan revision, checksum, and deterministic checkbox geometry. Playwright drives pinned Chromium to render explicit Letter-sized HTML/CSS. Optional theme artwork is stored as a versioned public asset and embedded as a data URL before rendering, so preview and PDF output do not depend on an external request. Artwork stays inside the fixed-height header and cannot move the checkbox manifest.
 
 The QR payload identifies the chart snapshot. Future scan processing can find corner markers, correct perspective, load the manifest, and map checkbox coordinates to occurrence IDs without trying to infer the schedule from text.
 

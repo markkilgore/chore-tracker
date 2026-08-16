@@ -36,7 +36,7 @@ describe("print chart renderer", () => {
     expect(html).toContain("Layout v1");
   });
 
-  it.each(["italy", "cats", "shark"])("renders the %s print theme", async (themeKey) => {
+  it.each(["italy", "cats", "shark", "shark-dino"])("renders the %s print theme", async (themeKey) => {
     const snapshot: ChartSnapshot = {
       chartId: `chart-${themeKey}`,
       householdName: "Test Family",
@@ -51,5 +51,26 @@ describe("print chart renderer", () => {
     const html = await renderChartHtml(snapshot, "abcdef0123456789");
     expect(html).toContain(`chart-page theme-${themeKey}`);
     expect(html).toContain(`.theme-${themeKey}`);
+  });
+
+  it.each([
+    ["cats", "PAWS, CHECKS &amp; PROUD MOMENTS"],
+    ["shark-dino", "THE PREHISTORIC OCEAN CREW"]
+  ])("embeds the %s storybook artwork in the deterministic chart", async (themeKey, kicker) => {
+    const snapshot: ChartSnapshot = {
+      chartId: `chart-${themeKey}`,
+      householdName: "Test Family",
+      memberId: "member-id",
+      memberName: themeKey === "cats" ? "Kate" : "Henry",
+      weekStartDate: "2026-08-09",
+      themeKey,
+      planRevision: 1,
+      rows: []
+    };
+
+    const html = await renderChartHtml(snapshot, "abcdef0123456789");
+    expect(html).toContain('class="theme-art"');
+    expect(html).toContain("data:image/webp;base64");
+    expect(html).toContain(kicker);
   });
 });

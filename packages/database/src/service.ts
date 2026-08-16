@@ -957,8 +957,8 @@ export function seedDemo(db = getSqlite()): string {
   const existing = getFirstHousehold(db);
   if (existing) return existing.id;
   const household = createHousehold("The Rivera Family", "America/Los_Angeles", db);
-  const kate = createMember(household.id, { displayName: "Kate", kind: "CHILD", canAdminister: false, themeKey: "space" }, db);
-  const henry = createMember(household.id, { displayName: "Henry", kind: "CHILD", canAdminister: false, themeKey: "ocean" }, db);
+  const kate = createMember(household.id, { displayName: "Kate", kind: "CHILD", canAdminister: false, themeKey: "cats" }, db);
+  const henry = createMember(household.id, { displayName: "Henry", kind: "CHILD", canAdminister: false, themeKey: "shark-dino" }, db);
   const dad = createMember(household.id, { displayName: "Dad", kind: "ADULT", canAdminister: true, themeKey: "sunny" }, db);
   const routines = listRoutines(household.id, db);
   const morning = routines.find((routine) => routine.name === "Morning")!.id;

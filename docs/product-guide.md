@@ -66,7 +66,7 @@ The PDF is US Letter portrait and contains:
 
 Editing the live week after issuing a chart does not alter that chart. Issue a new chart to reflect the new schedule.
 
-Sunny, Space, Ocean, Italy, Cats, and Sharks themes share the same chart layout and stable checkbox geometry. A theme changes presentation without changing schedule or scan metadata.
+Sunny, Space, Ocean, Italy, Cats, Sharks, and Sharks & Dinos themes share the same chart layout and stable checkbox geometry. Cats and Sharks & Dinos add low-ink storybook header artwork while preserving the standardized grid. The demo household starts Kate with Cats and Henry with Sharks & Dinos; an existing household can select either theme from the Family page.
 
 ## Deliberately post-MVP
 

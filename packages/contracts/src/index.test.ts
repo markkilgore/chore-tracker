@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { chartExportSchema, createMemberSchema, responsibilityActionSchema, themeKeySchema, updateMemberSchema } from "./index";
 
 describe("theme contracts", () => {
-  it.each(["sunny", "space", "ocean", "italy", "cats", "shark"])("accepts the %s theme", (themeKey) => {
+  it.each(["sunny", "space", "ocean", "italy", "cats", "shark", "shark-dino"])("accepts the %s theme", (themeKey) => {
     expect(themeKeySchema.parse(themeKey)).toBe(themeKey);
     expect(createMemberSchema.parse({ displayName: "Alex", kind: "CHILD", themeKey }).themeKey).toBe(themeKey);
     expect(updateMemberSchema.parse({ themeKey }).themeKey).toBe(themeKey);
