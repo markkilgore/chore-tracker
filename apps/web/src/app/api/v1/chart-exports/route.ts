@@ -1,11 +1,21 @@
 import { chartExportSchema } from "@chore-tracker/contracts";
-import { createChartExport } from "@chore-tracker/database";
+import { createChartExport, getWeekSnapshot, listMembers, withImmediateTransaction, getSqlite } from "@chore-tracker/database";
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { apiError } from "../../../../lib/http";
 
 export async function POST(request: NextRequest) {
   try {
-    const input = chartExportSchema.parse(await request.json());
+    const body = await request.json();
+    if (body.family === true) {
+      const { weeklyPlanId } = z.object({ weeklyPlanId: z.string().uuid() }).parse(body);
+      const ids = withImmediateTransaction(getSqlite(), () => {
+        const week = getWeekSnapshot(weeklyPlanId);
+        return listMembers(week.householdId).map((member) => createChartExport(weeklyPlanId, member.id));
+      });
+      return NextResponse.json({ previewUrl: `/print-family?charts=${ids.join(",")}` }, { status: 201 });
+    }
+    const input = chartExportSchema.parse(body);
     const chartId = createChartExport(input.weeklyPlanId, input.memberId, input.themeKey);
     return NextResponse.json({
       chartId,

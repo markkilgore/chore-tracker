@@ -16,7 +16,7 @@ export type RecurrenceRule = WeeklyDaysRule;
 
 export type AllocationRule =
   | { kind: "fixed"; memberId: string }
-  | { kind: "rotation"; participantIds: string[]; offset: number }
+  | { kind: "rotation"; participantIds: string[]; offset: number; cadence?: "occurrence" | "week" }
   | { kind: "open"; eligibleMemberIds?: string[] };
 
 export interface ResponsibilityTemplate {
@@ -145,7 +145,9 @@ export function generateWeekOccurrences(
         const participants = template.allocation.participantIds;
         if (participants.length === 0) throw new Error(`Rotation ${template.id} has no participants`);
         plannedAssigneeId = participants[
-          rotationIndexForDate(template.recurrence, dueDate, participants.length, template.allocation.offset)
+          template.allocation.cadence === "week"
+            ? ((Math.floor(daysBetween(startOfWeek(template.recurrence.anchorDate), startOfWeek(dueDate)) / 7 / template.recurrence.intervalWeeks) + template.allocation.offset) % participants.length + participants.length) % participants.length
+            : rotationIndexForDate(template.recurrence, dueDate, participants.length, template.allocation.offset)
         ];
         eligibleMemberIds = [...participants];
       } else {

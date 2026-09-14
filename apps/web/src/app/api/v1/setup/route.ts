@@ -1,4 +1,6 @@
 import {
+  withImmediateTransaction,
+  getSqlite,
   createChore,
   createHousehold,
   createMember,
@@ -42,6 +44,7 @@ export async function POST(request: NextRequest) {
     }
     if (body.action === "responsibility") {
       const input = createResponsibilitySchema.parse(body);
+      const result = withImmediateTransaction(getSqlite(), () => {
       const templateId = createResponsibility(household.id, {
           ...input,
           activeFrom: input.activeFrom as ISODate,
@@ -50,7 +53,9 @@ export async function POST(request: NextRequest) {
       const week = input.applyToPlanId && input.expectedRevision !== undefined
         ? applyResponsibilityToWeek(templateId, input.applyToPlanId, input.expectedRevision)
         : undefined;
-      return NextResponse.json({ id: templateId, week }, { status: 201 });
+      return { id: templateId, week };
+      });
+      return NextResponse.json(result, { status: 201 });
     }
     throw new Error("Unknown setup action");
   } catch (error) {

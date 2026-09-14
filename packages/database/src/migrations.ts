@@ -156,5 +156,30 @@ export const migrations = [
       );
       CREATE INDEX IF NOT EXISTS chart_exports_plan_member ON chart_exports(weekly_plan_id, member_id, created_at);
     `
+  },
+  {
+    version: 2,
+    name: "schedule_versions_and_requests",
+    sql: `
+      ALTER TABLE responsibility_templates ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE responsibility_templates ADD COLUMN rotation_cadence TEXT NOT NULL DEFAULT 'occurrence';
+      CREATE TABLE schedule_requests (
+        request_id TEXT PRIMARY KEY,
+        household_id TEXT NOT NULL REFERENCES households(id),
+        payload_hash TEXT NOT NULL,
+        result_json TEXT NOT NULL
+      );
+    `
+  },
+  {
+    version: 3,
+    name: "preserved_schedule_occurrences",
+    sql: `
+      CREATE TABLE schedule_preserved_occurrences (
+        template_id TEXT NOT NULL REFERENCES responsibility_templates(id) ON DELETE CASCADE,
+        occurrence_id TEXT NOT NULL REFERENCES chore_occurrences(id) ON DELETE CASCADE,
+        PRIMARY KEY(template_id, occurrence_id)
+      );
+    `
   }
 ] as const;

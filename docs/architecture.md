@@ -57,14 +57,20 @@ standing responsibility
 
 There is intentionally no second effective `weekly_overrides` overlay. After materialization, occurrences are the schedule for that week. Audit records explain how they changed, but do not compete with them to calculate current state.
 
-Generation is transactional and idempotent. A source-instance key prevents the same template/date pair from generating twice. Viewing an existing week does not reconcile it against later template edits.
+Generation is transactional and idempotent. A source-instance key prevents the same template/date pair from generating twice. Merely viewing an existing week does not reconcile it against later edits.
 
-Two explicit correction operations cross that boundary deliberately. Reassigning a standing responsibility updates its allocation plus generated, uncompleted, non-overridden occurrences from an effective date. Deleting an erroneous responsibility removes only generated work that has no completion or replacement dependency. Previously issued charts remain immutable historical snapshots and are not rewritten; after correcting a printed week, issue a replacement chart. Each affected weekly plan receives a new revision.
+Explicit schedule changes are atomic batches. They version a template using `supersedes_template_id`, end the previous version before the effective date, and reconcile unfinished work in every existing affected week. A version superseded before its own start is disabled rather than assigned an invalid end date. Earlier, ungenerated weeks still expand the appropriate historical version.
+
+Reconciliation keeps occurrence IDs where a date remains applicable, cancels removed dates, and creates newly applicable ones. Completion history and explicit manual changes are carried to the appropriate successor through `schedule_preserved_occurrences`, including repeated edits and adding another person. A moved occurrence protects its original scheduled date against accidental regeneration. A successor cannot be moved before its own version boundary; earlier dates belong to its predecessor. Each changed plan records an audit event and increments its revision. Issued chart snapshots and manifests never change.
+
+Preview runs the actual change inside a rolled-back savepoint. Its fingerprint covers the input and scheduling state, including completions and manual changes. Commit checks that fingerprint while holding the write lock, rejecting stale previews with HTTP 409. Request receipts make successful retries idempotent. Nested service operations use SQLite savepoints, so legacy create-and-apply requests also roll back together on failure.
+
+The dashboard reports each member's latest chart and whether its saved plan revision differs from the current week. Family chart issuance is one transaction and returns a combined print preview.
 
 ## Allocation semantics
 
 - **Fixed:** one planned member. Another household member may still be recorded as the actual completer.
-- **Rotation:** one occurrence and one deterministic assignee. The result depends on anchor date, recurrence sequence, participant order, and offset—not generation order.
+- **Rotation:** one occurrence and one deterministic assignee. Turns advance each occurrence or each scheduled week. The result depends on anchor date, recurrence interval/sequence, participant order, and offset, independent of generation order.
 - **Open:** no planned assignee. An eligible member becomes the actual completer.
 
 Multi-member shared completion is not simulated with duplicate occurrences. It will require an explicit future completion policy.

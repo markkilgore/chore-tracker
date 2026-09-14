@@ -16,7 +16,7 @@ Week-changing requests carry `expectedRevision`. If another session changed the 
 
 ### `GET /api/v1/dashboard?date=YYYY-MM-DD`
 
-Returns the household, active members, chores, routines, standing responsibilities, and the materialized week containing `date`. If no household exists, it returns `null`.
+Returns the household, active members, chores, routines, standing responsibilities, the materialized week containing `date`, and latest per-member chart statuses (`charts`, including `stale`). If no household exists, it returns `null`.
 
 ### `GET /api/v1/chart-exports/:chartId`
 
@@ -50,12 +50,29 @@ Removes an accidentally added, unused member. The request is rejected when respo
 
 Actions:
 
-- `end` with `activeThrough`: ends the standing schedule without rewriting generated weeks.
-- `reassign` with `memberId` and `effectiveFrom`: converts the standing allocation to that fixed member and corrects uncompleted generated occurrences from the date forward. Completed chores and explicit week-level reassignments remain unchanged.
+- `end` with `activeThrough`: stops the schedule beginning the following date and reconciles existing upcoming weeks.
+- `reassign` with `memberId` and `effectiveFrom`: creates an effective-dated fixed-assignee replacement and reconciles existing upcoming weeks. Completion history and manual exceptions remain unchanged. Prefer the preview-based schedules endpoint for new clients.
 
 ### `DELETE /api/v1/responsibilities/:templateId`
 
 Deletes a responsibility created in error and removes its unused generated occurrences. The request is rejected when completions, replacements, or successor templates depend on it. Affected weekly-plan revisions are incremented. Existing chart exports remain immutable snapshots; clients should issue a replacement chart after correcting a printed week.
+
+## Family schedule batches
+
+### `POST /api/v1/schedules`
+
+Send `{ change, preview: true, requestId }` to review, then `{ change, preview: false, requestId, token }` with the returned token to commit. `requestId` is a UUID retained across retries of the same save. A changed payload must use a new request ID.
+
+`change` contains:
+
+- `action`: `create`, `edit`, or `stop`.
+- `effectiveFrom`: real ISO calendar date.
+- `templateIds`: empty for create, one for edit, one or more for stop.
+- `entries`: empty for stop; otherwise one or more schedule drafts.
+
+Each draft contains `choreDefinitionId` or a new `title` (with optional `description`), nullable `routineId`, `mode` (`each`, `rotation`, `open`), ordered `memberIds`, `weekdays`, `intervalWeeks`, `rotationCadence` (`occurrence`, `week`), and nullable `activeThrough`. Optional `anchorDate` preserves the phase when copying an alternating-week schedule. New titles reuse active library chores with the same case-insensitive name.
+
+Preview returns `added`, `updated`, `removed`, `keptCompleted`, `keptExceptions`, `duplicatesSkipped`, affected `weeks` and `charts`, a two-week `examples` list, and `token`. Counts describe already-generated weeks. Preview creates no lasting records. All commit mutations happen together; a stale preview returns 409. Retrying a successful request returns its original result without repeating changes.
 
 ## Weekly editing
 
@@ -88,7 +105,7 @@ Voids the active completion instead of deleting history.
 
 ### `POST /api/v1/chart-exports`
 
-Issues an immutable chart for `weeklyPlanId` and `memberId`, optionally overriding the member theme. Returns preview and PDF URLs.
+Issues an immutable chart for `weeklyPlanId` and `memberId`, optionally overriding the member theme. Returns preview and PDF URLs. Alternatively send `{ weeklyPlanId, family: true }` to issue all active members’ charts atomically and receive one combined `previewUrl`.
 
 ### `GET /api/v1/chart-exports/:chartId/pdf`
 

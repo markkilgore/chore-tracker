@@ -94,10 +94,11 @@ describe("SQLite application model", () => {
 
     const result = reassignResponsibility(templateId, secondMember.id, dashboard.week.weekStartDate, db);
     const corrected = getDashboard(undefined, db)!;
-    const responsibility = corrected.responsibilities.find((item) => item.id === templateId)!;
-    const occurrences = corrected.week.occurrences.filter((item) => item.sourceTemplateId === templateId);
+    const responsibility = corrected.responsibilities.find((item) => item.supersedesTemplateId === templateId)!;
+    const occurrences = corrected.week.occurrences.filter((item) => generated.some((old) => old.id === item.id));
 
-    expect(result).toEqual({ updatedOccurrenceCount: 1, updatedPlanCount: 1 });
+    expect(result).toEqual({ updatedOccurrenceCount: 1, updatedPlanCount: 2 });
+    expect(corrected.responsibilities.find((item) => item.id === templateId)?.allocationKind).toBe("open");
     expect(responsibility.allocationKind).toBe("fixed");
     expect(responsibility.participantIds).toEqual([secondMember.id]);
     expect(occurrences.find((item) => item.id === generated[0].id)?.assigneeId).toBeNull();

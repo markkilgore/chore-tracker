@@ -1,7 +1,9 @@
+import type { ScheduleChange, ScheduleDraft } from "@chore-tracker/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import {
   addDays,
   dateInTimeZone,
+  daysBetween,
   generateWeekOccurrences,
   startOfWeek,
   weekDates,
@@ -49,7 +51,13 @@ export interface Routine {
 export interface ResponsibilitySummary {
   id: string;
   choreTitle: string;
+  choreDefinitionId: string;
   routineName: string | null;
+  routineId: string | null;
+  anchorDate: ISODate;
+  rotationCadence: "occurrence" | "week";
+  disabled: boolean;
+  supersedesTemplateId: string | null;
   allocationKind: "fixed" | "rotation" | "open";
   participantIds: string[];
   weekdays: number[];
@@ -94,6 +102,7 @@ export interface DashboardSnapshot {
   routines: Routine[];
   responsibilities: ResponsibilitySummary[];
   week: WeekSnapshot;
+  charts: { id: string; memberId: string; stale: boolean }[];
 }
 
 export interface ChartCell {
@@ -175,7 +184,7 @@ export function listRoutines(householdId: string, db = getSqlite()): Routine[] {
 export function listResponsibilities(householdId: string, db = getSqlite()): ResponsibilitySummary[] {
   const rows = db.prepare(`
     SELECT t.*, c.title AS chore_title, r.name AS routine_name,
-           (SELECT GROUP_CONCAT(p.member_id) FROM responsibility_participants p WHERE p.template_id = t.id ORDER BY p.position) AS participant_ids
+           (SELECT GROUP_CONCAT(member_id) FROM (SELECT member_id FROM responsibility_participants WHERE template_id = t.id ORDER BY position)) AS participant_ids
     FROM responsibility_templates t
     JOIN chore_definitions c ON c.id = t.chore_definition_id
     LEFT JOIN routines r ON r.id = t.routine_id
@@ -187,6 +196,12 @@ export function listResponsibilities(householdId: string, db = getSqlite()): Res
     return {
       id: String(row.id),
       choreTitle: String(row.chore_title),
+      choreDefinitionId: String(row.chore_definition_id),
+      routineId: row.routine_id == null ? null : String(row.routine_id),
+      anchorDate: recurrence.anchorDate,
+      rotationCadence: row.rotation_cadence as "occurrence" | "week",
+      disabled: Boolean(row.disabled),
+      supersedesTemplateId: row.supersedes_template_id == null ? null : String(row.supersedes_template_id),
       routineName: row.routine_name == null ? null : String(row.routine_name),
       allocationKind: row.allocation_kind as ResponsibilitySummary["allocationKind"],
       participantIds: row.participant_ids == null ? [] : String(row.participant_ids).split(","),
@@ -198,7 +213,7 @@ export function listResponsibilities(householdId: string, db = getSqlite()): Res
   });
 }
 
-function loadTemplates(householdId: string, weekStart: ISODate, db: SqliteDatabase): ResponsibilityTemplate[] {
+export function loadTemplates(householdId: string, weekStart: ISODate, db: SqliteDatabase): ResponsibilityTemplate[] {
   const weekEnd = addDays(weekStart, 6);
   const rows = db.prepare(`
     SELECT t.*, c.title AS chore_title, c.description AS chore_description, c.kind AS chore_kind,
@@ -206,7 +221,7 @@ function loadTemplates(householdId: string, weekStart: ISODate, db: SqliteDataba
     FROM responsibility_templates t
     JOIN chore_definitions c ON c.id = t.chore_definition_id
     LEFT JOIN routines r ON r.id = t.routine_id
-    WHERE t.household_id = ? AND t.active_from <= ?
+    WHERE t.household_id = ? AND t.disabled = 0 AND t.active_from <= ?
       AND (t.active_through IS NULL OR t.active_through >= ?)
     ORDER BY t.sort_order, c.title
   `).all(householdId, weekEnd, weekStart) as Row[];
@@ -223,7 +238,8 @@ function loadTemplates(householdId: string, weekStart: ISODate, db: SqliteDataba
     else if (allocationKind === "rotation") allocation = {
       kind: "rotation",
       participantIds: participants,
-      offset: Number(row.rotation_offset)
+      offset: Number(row.rotation_offset),
+      cadence: row.rotation_cadence as "occurrence" | "week"
     };
     else allocation = { kind: "open", eligibleMemberIds: participants };
 
@@ -353,7 +369,8 @@ export function getDashboard(requestedDate?: ISODate, db = getSqlite()): Dashboa
     chores: listChores(household.id, db),
     routines: listRoutines(household.id, db),
     responsibilities: listResponsibilities(household.id, db),
-    week: materializeWeek(household.id, date, db)
+    week: materializeWeek(household.id, date, db),
+    charts: listLatestCharts(materializeWeek(household.id, date, db).id, db)
   };
 }
 
@@ -461,97 +478,25 @@ export function updateChore(
 }
 
 export function endResponsibility(templateId: string, activeThrough: ISODate, db = getSqlite()): void {
-  const template = db.prepare(`SELECT active_from FROM responsibility_templates WHERE id = ?`).get(templateId) as Row | undefined;
-  if (!template) throw new Error("Responsibility not found");
-  if (activeThrough < String(template.active_from)) throw new Error("End date cannot be before the responsibility starts");
-  db.prepare(`UPDATE responsibility_templates SET active_through = ? WHERE id = ?`).run(activeThrough, templateId);
+  const row = db.prepare("SELECT household_id FROM responsibility_templates WHERE id = ?").get(templateId) as Row | undefined;
+  if (!row) throw new Error("Schedule not found");
+  changeSchedules(String(row.household_id), { action: "stop", effectiveFrom: addDays(activeThrough, 1), templateIds: [templateId], entries: [] }, db);
 }
 
-export function reassignResponsibility(
-  templateId: string,
-  memberId: string,
-  effectiveFrom: ISODate,
-  db = getSqlite()
-): { updatedOccurrenceCount: number; updatedPlanCount: number } {
-  let updatedOccurrenceCount = 0;
-  let updatedPlanCount = 0;
-  withImmediateTransaction(db, () => {
-    const template = db.prepare(`
-      SELECT household_id, allocation_kind, active_from, active_through
-      FROM responsibility_templates WHERE id = ?
-    `).get(templateId) as Row | undefined;
-    if (!template) throw new Error("Responsibility not found");
-    if (template.active_through != null && String(template.active_through) < effectiveFrom) {
-      throw new Error("This responsibility ended before the selected effective date");
-    }
-    const member = db.prepare(`
-      SELECT household_id, active FROM household_members WHERE id = ?
-    `).get(memberId) as Row | undefined;
-    if (!member || !member.active || member.household_id !== template.household_id) {
-      throw new Error("New assignee must be an active member of this household");
-    }
-
-    const previousParticipants = (db.prepare(`
-      SELECT member_id FROM responsibility_participants WHERE template_id = ? ORDER BY position
-    `).all(templateId) as Row[]).map((row) => String(row.member_id));
-    const previousAllocation = {
-      kind: String(template.allocation_kind),
-      participantIds: previousParticipants
-    };
-
-    db.prepare(`DELETE FROM responsibility_participants WHERE template_id = ?`).run(templateId);
-    db.prepare(`
-      INSERT INTO responsibility_participants(template_id, member_id, position) VALUES (?, ?, 0)
-    `).run(templateId, memberId);
-    db.prepare(`
-      UPDATE responsibility_templates SET allocation_kind = 'fixed', rotation_offset = 0 WHERE id = ?
-    `).run(templateId);
-
-    const occurrences = db.prepare(`
-      SELECT o.id, o.weekly_plan_id, a.member_id AS assignee_id,
-             (SELECT GROUP_CONCAT(e.member_id) FROM occurrence_eligible_members e WHERE e.occurrence_id = o.id) AS eligible_member_ids
-      FROM chore_occurrences o
-      LEFT JOIN occurrence_assignees a ON a.occurrence_id = o.id
-      WHERE o.source_template_id = ? AND o.due_date >= ?
-        AND NOT EXISTS (SELECT 1 FROM completions c WHERE c.occurrence_id = o.id AND c.voided_at IS NULL)
-        AND NOT EXISTS (SELECT 1 FROM weekly_plan_changes w WHERE w.occurrence_id = o.id AND w.action = 'REASSIGN')
-      ORDER BY o.due_date, o.id
-    `).all(templateId, effectiveFrom) as Row[];
-    const affectedPlans = new Set<string>();
-    for (const occurrence of occurrences) {
-      const currentAssigneeId = occurrence.assignee_id == null ? null : String(occurrence.assignee_id);
-      const eligibleMemberIds = occurrence.eligible_member_ids == null || String(occurrence.eligible_member_ids) === ""
-        ? []
-        : String(occurrence.eligible_member_ids).split(",");
-      if (currentAssigneeId === memberId && eligibleMemberIds.length === 0) continue;
-
-      const occurrenceId = String(occurrence.id);
-      const planId = String(occurrence.weekly_plan_id);
-      db.prepare(`DELETE FROM occurrence_assignees WHERE occurrence_id = ?`).run(occurrenceId);
-      db.prepare(`DELETE FROM occurrence_eligible_members WHERE occurrence_id = ?`).run(occurrenceId);
-      db.prepare(`INSERT INTO occurrence_assignees(occurrence_id, member_id) VALUES (?, ?)`)
-        .run(occurrenceId, memberId);
-      db.prepare(`
-        INSERT INTO weekly_plan_changes(id, weekly_plan_id, occurrence_id, action, before_json, after_json, created_at)
-        VALUES (?, ?, ?, 'REASSIGN_RESPONSIBILITY', ?, ?, ?)
-      `).run(
-        id(),
-        planId,
-        occurrenceId,
-        JSON.stringify({ allocation: previousAllocation, assigneeId: currentAssigneeId, eligibleMemberIds }),
-        JSON.stringify({ allocation: { kind: "fixed", participantIds: [memberId] }, assigneeId: memberId }),
-        now()
-      );
-      affectedPlans.add(planId);
-      updatedOccurrenceCount += 1;
-    }
-    for (const planId of affectedPlans) {
-      db.prepare(`UPDATE weekly_plans SET revision = revision + 1, updated_at = ? WHERE id = ?`)
-        .run(now(), planId);
-    }
-    updatedPlanCount = affectedPlans.size;
-  });
-  return { updatedOccurrenceCount, updatedPlanCount };
+export function reassignResponsibility(templateId: string, memberId: string, effectiveFrom: ISODate, db = getSqlite()) {
+  const row = db.prepare("SELECT household_id FROM responsibility_templates WHERE id = ?").get(templateId) as Row | undefined;
+  if (!row) throw new Error("Schedule not found");
+  const householdId = String(row.household_id);
+  const original = listResponsibilities(householdId, db).find((item) => item.id === templateId)!;
+  const result = changeSchedules(householdId, {
+    action: "edit", effectiveFrom, templateIds: [templateId], entries: [{
+      choreDefinitionId: original.choreDefinitionId, routineId: original.routineId,
+      weekdays: original.weekdays, intervalWeeks: original.intervalWeeks, anchorDate: original.anchorDate,
+      rotationCadence: original.rotationCadence, activeThrough: original.activeThrough,
+      mode: "each", memberIds: [memberId]
+    }]
+  }, db);
+  return { updatedOccurrenceCount: result.updated, updatedPlanCount: result.weeks };
 }
 
 export function deleteResponsibility(
@@ -763,13 +708,9 @@ export function updateOccurrence(
           .run(occurrenceId, input.memberId);
       }
     } else if (input.action === "reorder") {
-      if (row.source_template_id) {
-        db.prepare(`UPDATE chore_occurrences SET sort_order = ? WHERE weekly_plan_id = ? AND source_template_id = ?`)
-          .run(input.sortOrder, planId, row.source_template_id);
-      } else {
-        db.prepare(`UPDATE chore_occurrences SET sort_order = ? WHERE id = ?`).run(input.sortOrder, occurrenceId);
-      }
+      db.prepare(`UPDATE chore_occurrences SET sort_order = ? WHERE id = ?`).run(input.sortOrder, occurrenceId);
     }
+
     const after = db.prepare(`SELECT * FROM chore_occurrences WHERE id = ?`).get(occurrenceId);
     db.prepare(`
       INSERT INTO weekly_plan_changes(id, weekly_plan_id, occurrence_id, action, before_json, after_json, created_at)
@@ -875,20 +816,20 @@ export function createChartExport(planId: string, memberId: string, themeKey?: s
   `).get(memberId) as Row | undefined;
   if (!memberRow) throw new Error("Member not found");
 
-  const eligible = new Set((db.prepare(`
-    SELECT e.occurrence_id FROM occurrence_eligible_members e
-    JOIN chore_occurrences o ON o.id = e.occurrence_id
-    WHERE o.weekly_plan_id = ? AND e.member_id = ?
-  `).all(planId, memberId) as Row[]).map((row) => String(row.occurrence_id)));
   const occurrences = plan.occurrences.filter((occurrence) =>
     occurrence.status === "SCHEDULED" &&
     (occurrence.assigneeId === memberId || (occurrence.assigneeId === null &&
-      (eligible.has(occurrence.id) || occurrence.choreKind === "HOUSEHOLD")))
+      (occurrence.eligibleMemberIds.length === 0 || occurrence.eligibleMemberIds.includes(memberId))))
   );
   const dates = weekDates(plan.weekStartDate);
   const grouped = new Map<string, WeekOccurrence[]>();
   for (const occurrence of occurrences) {
-    const key = occurrence.sourceTemplateId ?? occurrence.id;
+    // Consecutive schedule versions share a printed row when their displayed work
+    // matches. Multiple occurrences on one day always get separate checkboxes.
+    const base = JSON.stringify([occurrence.choreDefinitionId, occurrence.routineId, occurrence.choreTitle]);
+    let slot = 0;
+    while (grouped.get(`${base}:${slot}`)?.some((item) => item.dueDate === occurrence.dueDate)) slot++;
+    const key = `${base}:${slot}`;
     grouped.set(key, [...(grouped.get(key) ?? []), occurrence]);
   }
   const rows: ChartRow[] = [...grouped.entries()].map(([key, items]) => ({
@@ -1008,4 +949,186 @@ export function seedDemo(db = getSqlite()): string {
     completeOccurrence(occurrence.id, occurrence.assigneeId ?? kate, dad, db);
   }
   return household.id;
+}
+
+export interface ScheduleImpact {
+  token?: string;
+  added: number;
+  updated: number;
+  removed: number;
+  keptCompleted: number;
+  keptExceptions: number;
+  duplicatesSkipped: number;
+  weeks: number;
+  charts: number;
+  templateIds: string[];
+  examples: { date: string; title: string; person: string }[];
+}
+
+export function listLatestCharts(planId: string, db = getSqlite()) {
+  return (db.prepare(`SELECT c.id, c.member_id, c.plan_revision, p.revision
+    FROM chart_exports c JOIN weekly_plans p ON p.id = c.weekly_plan_id
+    WHERE c.weekly_plan_id = ? AND c.rowid = (
+      SELECT MAX(x.rowid) FROM chart_exports x WHERE x.weekly_plan_id = c.weekly_plan_id AND x.member_id = c.member_id
+    )`).all(planId) as Row[]).map((row) => ({ id: String(row.id), memberId: String(row.member_id), stale: row.plan_revision !== row.revision }));
+}
+
+function scheduleFingerprint(householdId: string, change: ScheduleChange, db: SqliteDatabase): string {
+  // Include completions and explicit changes as well as plan revisions. Preview and
+  // commit run under the same write lock; a stale preview never overwrites new work.
+  const tables = ["responsibility_templates", "responsibility_participants", "schedule_preserved_occurrences", "weekly_plans", "chore_occurrences", "occurrence_assignees", "occurrence_eligible_members", "weekly_plan_changes", "completions", "chart_exports", "household_members", "chore_definitions", "routines"];
+  return createHash("sha256").update(JSON.stringify([householdId, change, ...tables.map((table) => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all())])).digest("hex");
+}
+
+export function reviewScheduleChange(householdId: string, change: ScheduleChange, db = getSqlite()): ScheduleImpact {
+  return withImmediateTransaction(db, () => {
+    const token = scheduleFingerprint(householdId, change, db);
+    db.exec("SAVEPOINT schedule_preview");
+    try { return { ...changeSchedules(householdId, change, db), token }; }
+    finally { db.exec("ROLLBACK TO schedule_preview"); db.exec("RELEASE schedule_preview"); }
+  });
+}
+
+export function commitScheduleChange(householdId: string, change: ScheduleChange, token: string | undefined, requestId: string, db = getSqlite()): ScheduleImpact {
+  return withImmediateTransaction(db, () => {
+    const hash = createHash("sha256").update(JSON.stringify(change)).digest("hex");
+    const prior = db.prepare("SELECT * FROM schedule_requests WHERE request_id = ?").get(requestId) as Row | undefined;
+    if (prior) {
+      if (prior.household_id !== householdId || prior.payload_hash !== hash) throw new Error("This request was already used for another change");
+      return JSON.parse(String(prior.result_json)) as ScheduleImpact;
+    }
+    if (!token || token !== scheduleFingerprint(householdId, change, db)) {
+      const error = new Error("The family schedule changed. Review the changes again before saving.");
+      error.name = "RevisionConflict";
+      throw error;
+    }
+    const result = changeSchedules(householdId, change, db);
+    db.prepare("INSERT INTO schedule_requests VALUES (?, ?, ?, ?)").run(requestId, householdId, hash, JSON.stringify(result));
+    return result;
+  });
+}
+
+export function changeSchedules(householdId: string, change: ScheduleChange, db = getSqlite()): ScheduleImpact {
+  return withImmediateTransaction(db, () => {
+    const effective = change.effectiveFrom as ISODate;
+    const impact: ScheduleImpact = { added: 0, updated: 0, removed: 0, keptCompleted: 0, keptExceptions: 0, duplicatesSkipped: 0, weeks: 0, charts: 0, templateIds: [], examples: [] };
+    const originals = [...new Set(change.templateIds)].map((templateId) => {
+      const row = db.prepare("SELECT * FROM responsibility_templates WHERE id = ? AND household_id = ?").get(templateId, householdId) as Row | undefined;
+      if (!row || row.disabled || row.active_through && String(row.active_through) < effective) throw new Error("This schedule has ended. Refresh and choose an active schedule.");
+      if (row.supersedes_template_id && effective < String(row.active_from)) throw new Error(`Choose a change date on or after ${row.active_from}; earlier dates belong to the previous schedule.`);
+      if (db.prepare("SELECT 1 FROM responsibility_templates WHERE supersedes_template_id = ?").get(templateId)) throw new Error("This schedule already has a replacement. Edit the latest schedule instead.");
+      return row;
+    });
+    if (change.action === "edit" && (originals.length !== 1 || change.entries.some((entry) => entry.choreDefinitionId !== originals[0].chore_definition_id))) throw new Error("Edit one existing chore schedule at a time");
+    const originalIds = originals.map((row) => String(row.id));
+    // Each successor owns the preserved exceptions that substitute for its work.
+    // This also lets an edit add another child without hiding their new checkbox
+    // merely because the original child's chore was already completed.
+    const preservedIds = new Set<string>();
+    for (const originalId of originalIds) {
+      for (const row of db.prepare("SELECT occurrence_id FROM schedule_preserved_occurrences WHERE template_id = ?").all(originalId) as Row[]) preservedIds.add(String(row.occurrence_id));
+    }
+    for (const original of originals) {
+      if (effective <= String(original.active_from)) db.prepare("UPDATE responsibility_templates SET disabled = 1 WHERE id = ?").run(original.id);
+      else db.prepare("UPDATE responsibility_templates SET active_through = ? WHERE id = ?").run(addDays(effective, -1), original.id);
+    }
+
+    const members = listMembers(householdId, db);
+    const routines = listRoutines(householdId, db);
+    for (const draft of change.entries) {
+      if (!draft.memberIds.length || draft.memberIds.some((memberId) => !members.some((member) => member.id === memberId))) throw new Error("Choose active members of this household");
+      if (draft.routineId && !routines.some((routine) => routine.id === draft.routineId)) throw new Error("Choose a routine from this household");
+      if (draft.activeThrough && draft.activeThrough < effective) throw new Error("End date must be on or after the start date");
+      let choreId = draft.choreDefinitionId;
+      if (!choreId) {
+        const existing = db.prepare("SELECT id FROM chore_definitions WHERE household_id = ? AND title = ? COLLATE NOCASE AND active = 1").get(householdId, draft.title?.trim()) as Row | undefined;
+        choreId = existing ? String(existing.id) : createChore(householdId, { title: draft.title!, description: draft.description, kind: draft.mode === "each" ? "INDIVIDUAL" : "HOUSEHOLD" }, db);
+      }
+      if (!listChores(householdId, db).some((chore) => chore.id === choreId)) throw new Error("Choose an active chore from this household");
+      const allocations: AllocationRule[] = draft.mode === "each" ? draft.memberIds.map((memberId) => ({ kind: "fixed", memberId }))
+        : draft.mode === "rotation" ? [{ kind: "rotation", participantIds: draft.memberIds, offset: 0, cadence: draft.rotationCadence }]
+        : [{ kind: "open", eligibleMemberIds: draft.memberIds }];
+      for (const allocation of allocations) {
+        const people = allocation.kind === "fixed" ? [allocation.memberId] : allocation.kind === "rotation" ? allocation.participantIds : allocation.eligibleMemberIds!;
+        const duplicate = listResponsibilities(householdId, db).some((schedule) => !schedule.disabled && schedule.choreDefinitionId === choreId && schedule.routineId === draft.routineId
+          && schedule.allocationKind === allocation.kind && JSON.stringify(allocation.kind === "open" ? [...schedule.participantIds].sort() : schedule.participantIds) === JSON.stringify(allocation.kind === "open" ? [...people].sort() : people)
+          && schedule.activeFrom <= effective && (!schedule.activeThrough || draft.activeThrough !== null && schedule.activeThrough >= draft.activeThrough)
+          && schedule.intervalWeeks === draft.intervalWeeks && JSON.stringify([...schedule.weekdays].sort()) === JSON.stringify([...new Set(draft.weekdays)].sort())
+          && (allocation.kind !== "rotation" || schedule.rotationCadence === draft.rotationCadence)
+          && (draft.intervalWeeks === 1 || daysBetween(startOfWeek(schedule.anchorDate), startOfWeek((draft.anchorDate ?? effective) as ISODate)) % (7 * draft.intervalWeeks) === 0));
+        if (duplicate) { impact.duplicatesSkipped++; continue; }
+        const templateId = createResponsibility(householdId, { choreDefinitionId: choreId, routineId: draft.routineId, activeFrom: effective, weekdays: draft.weekdays, intervalWeeks: draft.intervalWeeks, allocation }, db);
+        const anchor = draft.anchorDate && draft.anchorDate <= effective ? draft.anchorDate : effective;
+        db.prepare(`UPDATE responsibility_templates SET active_through = ?, supersedes_template_id = ?, rotation_cadence = ?, recurrence_json = ? WHERE id = ?`)
+          .run(draft.activeThrough, originalIds[0] ?? null, draft.rotationCadence,
+            JSON.stringify({ kind: "weekly_days", anchorDate: anchor, intervalWeeks: draft.intervalWeeks, weekdays: [...new Set(draft.weekdays)].sort() }), templateId);
+        impact.templateIds.push(templateId);
+      }
+    }
+
+    const affected = new Set<string>();
+    const plans = db.prepare("SELECT * FROM weekly_plans WHERE household_id = ? AND week_start_date >= ? ORDER BY week_start_date").all(householdId, startOfWeek(effective)) as Row[];
+    for (const plan of plans) {
+      const planId = String(plan.id);
+      const before = getWeekSnapshot(planId, db);
+      const rows = db.prepare("SELECT * FROM chore_occurrences WHERE weekly_plan_id = ?").all(planId) as Row[];
+      const candidates = rows.filter((row) => (originalIds.includes(String(row.source_template_id)) || preservedIds.has(String(row.id))) && (String(row.due_date) >= effective || String(row.source_instance_key).slice(-10) >= effective));
+      const protectedDates = new Set<string>();
+      const replacements = listResponsibilities(householdId, db).filter((schedule) => impact.templateIds.includes(schedule.id));
+      const mutable: Row[] = [];
+      for (const row of candidates) {
+        const completed = db.prepare("SELECT 1 FROM completions WHERE occurrence_id = ?").get(row.id);
+        const exception = db.prepare("SELECT 1 FROM weekly_plan_changes WHERE occurrence_id = ? AND action IN ('REASSIGN','MOVE','CANCEL','RESTORE','REORDER')").get(row.id);
+        if (completed || exception) {
+          const assignee = before.occurrences.find((item) => item.id === row.id)?.assigneeId;
+          const replacement = replacements.find((schedule) => schedule.allocationKind === "fixed" && schedule.participantIds.includes(assignee ?? "")) ?? replacements[0];
+          if (replacement) {
+            protectedDates.add(`${replacement.id}:${String(row.source_instance_key).slice(-10)}`);
+            db.prepare("INSERT OR IGNORE INTO schedule_preserved_occurrences VALUES (?, ?)").run(replacement.id, row.id);
+          }
+          if (completed) impact.keptCompleted++; else impact.keptExceptions++;
+        } else if (row.status === "SCHEDULED") mutable.push(row);
+      }
+      const generated = generateWeekOccurrences(loadTemplates(householdId, before.weekStartDate, db).filter((template) => impact.templateIds.includes(template.id)), before.weekStartDate)
+        .filter((occurrence) => occurrence.dueDate >= effective && !protectedDates.has(`${occurrence.sourceTemplateId}:${occurrence.dueDate}`));
+      for (const occurrence of generated) {
+        const oldIndex = mutable.findIndex((row) => row.due_date === occurrence.dueDate);
+        const old = oldIndex < 0 ? undefined : mutable.splice(oldIndex, 1)[0];
+        const occurrenceId = old ? String(old.id) : id();
+        if (old) {
+          db.prepare(`UPDATE chore_occurrences SET source_template_id = ?, source_instance_key = ?, routine_id = ?, routine_name_snapshot = ?, chore_title_snapshot = ?, chore_description_snapshot = ? WHERE id = ?`)
+            .run(occurrence.sourceTemplateId, occurrence.sourceInstanceKey, occurrence.routineId ?? null, occurrence.routineName ?? null, occurrence.choreTitle, occurrence.choreDescription ?? null, occurrenceId);
+          db.prepare("DELETE FROM occurrence_assignees WHERE occurrence_id = ?").run(occurrenceId);
+          db.prepare("DELETE FROM occurrence_eligible_members WHERE occurrence_id = ?").run(occurrenceId);
+          impact.updated++;
+        } else {
+          db.prepare(`INSERT INTO chore_occurrences(id, weekly_plan_id, chore_definition_id, source_template_id, source_instance_key, origin, due_date, status, chore_title_snapshot, chore_description_snapshot, chore_kind_snapshot, routine_id, routine_name_snapshot, sort_order, created_at)
+            VALUES (?, ?, ?, ?, ?, 'RECURRING', ?, 'SCHEDULED', ?, ?, ?, ?, ?, ?, ?)`)
+            .run(occurrenceId, planId, occurrence.choreDefinitionId, occurrence.sourceTemplateId, occurrence.sourceInstanceKey, occurrence.dueDate, occurrence.choreTitle, occurrence.choreDescription ?? null, occurrence.choreKind, occurrence.routineId ?? null, occurrence.routineName ?? null, occurrence.sortOrder, now());
+          impact.added++;
+        }
+        if (occurrence.plannedAssigneeId) db.prepare("INSERT INTO occurrence_assignees VALUES (?, ?)").run(occurrenceId, occurrence.plannedAssigneeId);
+        for (const memberId of occurrence.eligibleMemberIds) db.prepare("INSERT INTO occurrence_eligible_members VALUES (?, ?)").run(occurrenceId, memberId);
+        affected.add(planId);
+      }
+      for (const row of mutable) {
+        db.prepare("UPDATE chore_occurrences SET status = 'CANCELLED' WHERE id = ?").run(row.id);
+        impact.removed++; affected.add(planId);
+      }
+      if (affected.has(planId)) {
+        db.prepare("INSERT INTO weekly_plan_changes(id, weekly_plan_id, action, before_json, after_json, created_at) VALUES (?, ?, 'SCHEDULE_CHANGE', ?, ?, ?)")
+          .run(id(), planId, JSON.stringify(before), JSON.stringify(change), now());
+        bumpRevision(planId, before.revision, db);
+        impact.charts += listLatestCharts(planId, db).filter((chart) => chart.stale).length;
+      }
+    }
+    impact.weeks = affected.size;
+    // Preview a fortnight even when those weeks have never been opened. No week is generated by previewing.
+    for (let offset = 0; offset < 21; offset += 7) {
+      const week = addDays(startOfWeek(effective), offset);
+      const generated = generateWeekOccurrences(loadTemplates(householdId, week, db).filter((template) => impact.templateIds.includes(template.id)), week);
+      impact.examples.push(...generated.filter((item) => item.dueDate >= effective && item.dueDate < addDays(effective, 14)).map((item) => ({ date: item.dueDate, title: item.choreTitle, person: members.find((member) => member.id === item.plannedAssigneeId)?.displayName ?? "Anyone selected" })));
+    }
+    return impact;
+  });
 }

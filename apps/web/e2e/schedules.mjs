@@ -1,0 +1,106 @@
+// Run only against a disposable empty database, e.g. the command in docs/development.md.
+import { chromium } from "playwright";
+import assert from "node:assert/strict";
+const base = process.env.SCHEDULE_TEST_URL;
+if (!base || !/^http:\/\/127\.0\.0\.1:\d+$/.test(base)) throw new Error("Set SCHEDULE_TEST_URL to the disposable local server URL");
+assert.equal(await (await fetch(`${base}/api/v1/dashboard`)).json(), null, "Browser test requires an empty disposable database");
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+page.setDefaultTimeout(10000);
+const errors = [];
+page.on("pageerror", (error) => errors.push(error.message));
+const dialog = page.getByRole("dialog");
+async function saveSchedule() {
+  await dialog.getByRole("button", { name: "Review changes", exact: true }).click();
+  await dialog.getByRole("heading", { name: "Review your changes" }).waitFor();
+  await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
+  await dialog.waitFor({ state: "hidden" });
+}
+try {
+  await page.goto(base);
+  await page.getByLabel("Household name").fill("Browser family");
+  await page.getByRole("button", { name: "Create household", exact: true }).click();
+  await page.getByRole("button", { name: /1. Add family/ }).click();
+  const form = page.locator("form").filter({ has: page.getByRole("heading", { name: "Add household member" }) });
+  for (const name of ["Kate", "Henry"]) {
+    await form.getByLabel("Name", { exact: true }).fill(name);
+    await form.getByRole("button", { name: "Add member", exact: true }).click();
+    await page.getByRole("heading", { name, exact: true }).waitFor();
+  }
+  await page.getByRole("button", { name: "2. Choose chores", exact: true }).click();
+  await dialog.getByLabel("Or name a new chore").fill("Make bed");
+  await dialog.getByLabel("Kate", { exact: true }).check();
+  await dialog.getByLabel("Henry", { exact: true }).check();
+  await dialog.getByRole("button", { name: "Weekdays", exact: true }).click();
+  await dialog.getByRole("combobox", { name: "Routine", exact: true }).selectOption({ label: "Morning" });
+  await saveSchedule();
+  await page.getByRole("button", { name: "3. Review week", exact: true }).click();
+  let data = await (await fetch(`${base}/api/v1/dashboard`)).json();
+  assert.equal(data.responsibilities.length, 2);
+  assert.equal(data.chores.length, 1);
+  const previousWeekLabel = await page.locator(".week-nav strong").textContent();
+  await page.getByRole("button", { name: "Next week", exact: true }).click();
+  await page.waitForFunction((week) => document.querySelector(".week-nav strong")?.textContent !== week, previousWeekLabel);
+  const completeResponse = page.waitForResponse((response) => response.url().endsWith("/completion") && response.request().method() === "POST");
+  await page.locator(".chore-chip .check-button").first().click();
+  assert.equal((await completeResponse).ok(), true, "First-run recording identity must be valid");
+  await page.locator(".chore-chip.done").first().waitFor();
+  await page.getByRole("button", { name: /Chores & schedules/ }).click();
+  await page.getByRole("button", { name: "+ Add chore", exact: true }).click();
+  await dialog.getByLabel("Or name a new chore").fill("Feed dog");
+  await dialog.getByRole("combobox", { name: "How it is shared", exact: true }).selectOption("rotation");
+  await dialog.getByLabel("Kate", { exact: true }).check();
+  await dialog.getByLabel("Henry", { exact: true }).check();
+  await dialog.getByRole("combobox", { name: "Change turns", exact: true }).selectOption("week");
+  await dialog.getByRole("button", { name: "Move Henry earlier in rotation" }).click();
+  await saveSchedule();
+  const row = page.locator(".schedule-row").filter({ has: page.getByText("Feed dog", { exact: true }) });
+  await row.getByRole("button", { name: "Edit schedule", exact: true }).click();
+  await dialog.getByRole("button", { name: "Weekends", exact: true }).click();
+  await dialog.getByRole("combobox", { name: "Frequency", exact: true }).selectOption("2");
+  await saveSchedule();
+  assert.match(await page.locator(".schedule-list").innerText(), /Every 2 weeks/);
+  await page.getByRole("button", { name: "Copy schedule from…", exact: true }).click();
+  await dialog.getByRole("combobox", { name: "Copy schedule from", exact: true }).selectOption({ label: "Kate" });
+  await dialog.getByRole("combobox", { name: "Apply all selected chores to", exact: true }).selectOption({ label: "Henry" });
+  await dialog.getByRole("button", { name: "Review changes", exact: true }).click();
+  await dialog.getByText(/matching assignments already exist/).waitFor();
+  await dialog.getByRole("button", { name: "Save changes", exact: true }).click();
+  await dialog.waitFor({ state: "hidden" });
+  // Copy with an adjustment rather than duplicating an existing assignment.
+  await page.getByRole("button", { name: "Copy schedule from…", exact: true }).click();
+  await dialog.getByRole("combobox", { name: "Copy schedule from", exact: true }).selectOption({ label: "Kate" });
+  await dialog.getByRole("combobox", { name: "Apply all selected chores to", exact: true }).selectOption({ label: "Henry" });
+  await dialog.getByRole("button", { name: "Weekends", exact: true }).click();
+  await saveSchedule();
+  await page.screenshot({ path: "/tmp/tidy-schedules-desktop.png", fullPage: true });
+  await page.getByRole("button", { name: /This week/ }).click();
+  await page.getByRole("button", { name: "Print family charts", exact: true }).click();
+  const printLink = page.getByRole("link", { name: /Open Family charts/ });
+  await printLink.waitFor();
+  const printPage = await browser.newPage();
+  await printPage.goto(`${base}${await printLink.getAttribute("href")}`);
+  const frame = printPage.frameLocator("iframe");
+  await frame.locator(".chart-page").first().waitFor();
+  assert.equal(await frame.locator(".chart-page").count(), 2);
+  await printPage.close();
+  // Stop a schedule and surface the stale-chart message.
+  await page.getByRole("button", { name: /Chores & schedules/ }).click();
+  await page.locator(".schedule-row").filter({ has: page.getByText("Make bed", { exact: true }) }).first().getByRole("button", { name: "Stop…" }).click();
+  await saveSchedule();
+  await page.getByRole("button", { name: /This week/ }).click();
+  await page.getByText(/Schedule changed — print updated charts/).waitFor();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(base);
+  await page.getByRole("heading", { name: /Today ·/ }).waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true, "Mobile page must fit viewport");
+  await page.getByRole("button", { name: "+ Add chore", exact: true }).click();
+  await dialog.getByLabel("Or name a new chore").fill("Pack lunch");
+  await dialog.getByLabel("Henry", { exact: true }).check();
+  await page.screenshot({ path: "/tmp/tidy-schedules-mobile.png", fullPage: true });
+  await saveSchedule();
+  assert.deepEqual(errors, []);
+  data = await (await fetch(`${base}/api/v1/dashboard`)).json();
+  assert.equal(data.chores.length, 3);
+  console.log("PASS: setup, multi-person assignment, weekly rotation, schedule edit, duplicate-safe copy, adjusted copy, family print, stop, stale charts, and mobile layout. No browser errors.");
+} catch (error) { await page.screenshot({ path: "/tmp/tidy-schedules-failure.png", fullPage: true }); console.error(await page.locator("body").ariaSnapshot()); throw error; } finally { await browser.close(); }

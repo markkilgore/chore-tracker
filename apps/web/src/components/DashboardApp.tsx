@@ -2,10 +2,10 @@
 
 import type { DashboardSnapshot, WeekOccurrence } from "@chore-tracker/database";
 import { THEME_OPTIONS } from "@chore-tracker/contracts/themes";
-import { addDays, formatWeekRange, WEEKDAY_LABELS, type ISODate } from "@chore-tracker/domain";
+import { addDays, dateInTimeZone, startOfWeek, formatWeekRange, WEEKDAY_LABELS, type ISODate } from "@chore-tracker/domain";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { FormEvent, useMemo, useState } from "react";
+import { ScheduleDialog, ScheduleList, type ScheduleEditor } from "./Schedules";
+import { FormEvent, useEffect, useState } from "react";
 
 type Tab = "week" | "chores" | "family";
 
@@ -17,7 +17,6 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export function DashboardApp({ initial }: { initial: DashboardSnapshot | null }) {
-  const router = useRouter();
   const [data, setData] = useState(initial);
   const [tab, setTab] = useState<Tab>("week");
   const [busy, setBusy] = useState(false);
@@ -25,11 +24,49 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
   const [notice, setNotice] = useState<string | null>(null);
   const [actorId, setActorId] = useState(initial?.members.find((member) => member.canAdminister)?.id ?? initial?.members[0]?.id ?? "");
   const [editorOpen, setEditorOpen] = useState(false);
-  const [allocationKind, setAllocationKind] = useState<"fixed" | "rotation" | "open">("fixed");
+  const [scheduleEditor, setScheduleEditor] = useState<ScheduleEditor | null>(null);
+  const [familyMember, setFamilyMember] = useState<string | null>(null);
+  const [setupGuide, setSetupGuide] = useState(!initial?.responsibilities.length);
+  const [boardView, setBoardView] = useState<"week" | "today">("week");
+  const [listPerson, setListPerson] = useState("");
+  const [printLinks, setPrintLinks] = useState<{ name: string; url: string }[]>([]);
+  useEffect(() => { setData(initial); }, [initial]);
+  useEffect(() => {
+    if (data && !data.members.some((member) => member.id === actorId)) setActorId(data.members.find((member) => member.canAdminister)?.id ?? data.members[0]?.id ?? "");
+  }, [data, actorId]);
+  useEffect(() => {
+    if (initial && window.matchMedia("(max-width: 620px)").matches && initial.week.dates.includes(dateInTimeZone(new Date(), initial.household.timezone))) setBoardView("today");
+  }, [initial]);
+  function openSchedule(editor: ScheduleEditor) {
+    // Completed chores can still point to an older schedule version.
+    if (editor.templateId && data) {
+      let templateId = editor.templateId;
+      const seen = new Set<string>();
+      while (!seen.has(templateId)) {
+        seen.add(templateId);
+        const next = data.responsibilities.find((schedule) => schedule.supersedesTemplateId === templateId && !schedule.disabled);
+        if (!next) break;
+        templateId = next.id;
+      }
+      const schedule = data.responsibilities.find((item) => item.id === templateId);
+      if (!schedule || schedule.disabled || schedule.activeThrough && editor.date && schedule.activeThrough < editor.date) {
+        setError("This schedule has ended. Add a new chore schedule from Chores & schedules."); return;
+      }
+      editor = { ...editor, templateId, date: editor.date && editor.date < schedule.activeFrom ? schedule.activeFrom : editor.date };
+    }
+    setScheduleEditor(editor);
+  }
 
   async function refresh(date = data?.week.weekStartDate) {
     const next = await api<DashboardSnapshot>(`/api/v1/dashboard${date ? `?date=${date}` : ""}`, { cache: "no-store" });
     setData(next);
+  }
+
+  async function navigateWeek(date: ISODate) {
+    setBusy(true); setError(null);
+    try { await refresh(date); window.history.replaceState(null, "", `/?date=${date}`); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Could not open week"); }
+    finally { setBusy(false); }
   }
 
   async function act(work: () => Promise<unknown>, successMessage?: string) {
@@ -40,8 +77,10 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
       await work();
       await refresh();
       if (successMessage) setNotice(successMessage);
+      return true;
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Something went wrong");
+      return false;
     } finally {
       setBusy(false);
     }
@@ -51,7 +90,7 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
 
   const completed = data.week.occurrences.filter((item) => item.status === "SCHEDULED" && item.completionId).length;
   const scheduled = data.week.occurrences.filter((item) => item.status === "SCHEDULED").length;
-  const memberById = new Map(data.members.map((member) => [member.id, member]));
+  const today = dateInTimeZone(new Date(), data.household.timezone);
 
   async function toggleCompletion(occurrence: WeekOccurrence, memberId?: string) {
     await act(async () => {
@@ -76,7 +115,7 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
   async function submitOneOff(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    await act(() => api(`/api/v1/weeks/${data!.week.id}/one-offs`, {
+    const saved = await act(() => api(`/api/v1/weeks/${data!.week.id}/one-offs`, {
       method: "POST",
       body: JSON.stringify({
         choreDefinitionId: form.get("choreDefinitionId"),
@@ -86,16 +125,17 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
         expectedRevision: data!.week.revision
       })
     }));
-    setEditorOpen(false);
+    if (saved) setEditorOpen(false);
   }
 
   async function submitSimple(event: FormEvent<HTMLFormElement>, action: string) {
     event.preventDefault();
-    const form = new FormData(event.currentTarget);
+    const element = event.currentTarget;
+    const form = new FormData(element);
     const payload = Object.fromEntries(form.entries());
     if (action === "member") payload.canAdminister = String(form.get("canAdminister") === "on");
-    await act(() => api("/api/v1/setup", { method: "POST", body: JSON.stringify({ action, ...payload, canAdminister: payload.canAdminister === "true" }) }));
-    event.currentTarget.reset();
+    const saved = await act(() => api("/api/v1/setup", { method: "POST", body: JSON.stringify({ action, ...payload, canAdminister: payload.canAdminister === "true" }) }));
+    if (saved) element.reset();
   }
 
   async function editChore(event: FormEvent<HTMLFormElement>, choreId: string) {
@@ -120,73 +160,13 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
     });
   }
 
-  async function stopResponsibility(templateId: string, activeFrom: ISODate) {
-    const selectedWeekEnd = addDays(data!.week.weekStartDate, 6);
-    await act(() => api(`/api/v1/responsibilities/${templateId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ action: "end", activeThrough: selectedWeekEnd < activeFrom ? activeFrom : selectedWeekEnd })
-    }));
-  }
-
-  async function reassignStandingResponsibility(event: FormEvent<HTMLFormElement>, templateId: string, choreTitle: string) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const memberId = String(form.get("memberId"));
-    const memberName = data!.members.find((member) => member.id === memberId)?.displayName ?? "that member";
-    if (!window.confirm(`Assign ${choreTitle} to ${memberName} from the selected week forward? Uncompleted generated chores will be corrected too.`)) return;
-    await act(() => api(`/api/v1/responsibilities/${templateId}`, {
-      method: "PATCH",
-      body: JSON.stringify({ action: "reassign", memberId, effectiveFrom: data!.week.weekStartDate })
-    }), `${choreTitle} is now assigned to ${memberName} from this week forward.`);
-  }
-
-  async function deleteStandingResponsibility(templateId: string, choreTitle: string) {
-    if (!window.confirm(`Delete the ${choreTitle} standing responsibility? Its unused generated chores will also be removed. Completion history remains protected; previously issued charts stay unchanged and should be reissued.`)) return;
-    await act(
-      () => api(`/api/v1/responsibilities/${templateId}`, { method: "DELETE" }),
-      `${choreTitle} was deleted and the schedule was refreshed.`
-    );
-  }
-
-  async function submitResponsibility(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const participants = form.getAll("participants").map(String);
-    const allocation = allocationKind === "fixed"
-      ? { kind: "fixed", memberId: String(form.get("fixedMemberId")) }
-      : allocationKind === "rotation"
-        ? { kind: "rotation", participantIds: participants, offset: 0 }
-        : { kind: "open", eligibleMemberIds: participants };
-    await act(() => api("/api/v1/setup", {
-      method: "POST",
-      body: JSON.stringify({
-        action: "responsibility",
-        choreDefinitionId: form.get("choreDefinitionId"),
-        routineId: form.get("routineId") || null,
-        activeFrom: form.get("activeFrom"),
-        weekdays: form.getAll("weekdays").map(Number),
-        intervalWeeks: 1,
-        allocation,
-        applyToPlanId: form.get("applyToCurrent") === "on" ? data!.week.id : undefined,
-        expectedRevision: form.get("applyToCurrent") === "on" ? data!.week.revision : undefined
-      })
-    }));
-    event.currentTarget.reset();
-  }
-
-  async function printFor(memberId: string) {
-    setBusy(true);
-    try {
+  async function printFor(memberId?: string) {
+    await act(async () => {
       const result = await api<{ previewUrl: string }>("/api/v1/chart-exports", {
-        method: "POST",
-        body: JSON.stringify({ weeklyPlanId: data!.week.id, memberId })
+        method: "POST", body: JSON.stringify(memberId ? { weeklyPlanId: data!.week.id, memberId } : { weeklyPlanId: data!.week.id, family: true })
       });
-      window.open(result.previewUrl, "_blank", "noopener,noreferrer");
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create chart");
-    } finally {
-      setBusy(false);
-    }
+      setPrintLinks([{ name: memberId ? `${data!.members.find((member) => member.id === memberId)?.displayName}'s chart` : "Family charts", url: result.previewUrl }]);
+    }, "Charts are ready. Open the preview below to print.");
   }
 
   return (
@@ -196,12 +176,12 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
         <div className="brand-copy"><strong>Tidy Week</strong><small>{data.household.name}</small></div>
         <nav>
           <button className={tab === "week" ? "active" : ""} onClick={() => setTab("week")}><span>▦</span> This week</button>
-          <button className={tab === "chores" ? "active" : ""} onClick={() => setTab("chores")}><span>☷</span> Chore library</button>
+          <button className={tab === "chores" ? "active" : ""} onClick={() => setTab("chores")}><span>☷</span> Chores & schedules</button>
           <button className={tab === "family" ? "active" : ""} onClick={() => setTab("family")}><span>⌂</span> Family</button>
         </nav>
         <div className="sidebar-footer">
-          <label>Recording as</label>
-          <select value={actorId} onChange={(event) => setActorId(event.target.value)}>
+          <label htmlFor="recording-as">Recording as</label>
+          <select id="recording-as" value={actorId} onChange={(event) => setActorId(event.target.value)}>
             {data.members.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}
           </select>
           <small>Trusted home network</small>
@@ -213,6 +193,7 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
           <span>{error ?? notice}</span>
           <button type="button" aria-label="Dismiss notification" onClick={() => { setError(null); setNotice(null); }}>×</button>
         </div>}
+        {setupGuide && <section className="panel setup-steps"><h2>Set up your family week</h2><p>Add your family, choose chores, then review the week together.</p><div className="action-row"><button className="secondary" onClick={() => setTab("family")}>1. Add family {data.members.length > 0 ? "✓" : ""}</button><button className="secondary" disabled={!data.members.length} onClick={() => setScheduleEditor({ kind: "add" })}>2. Choose chores</button><button className="secondary" disabled={!data.responsibilities.length} onClick={() => { setTab("week"); setSetupGuide(false); }}>3. Review week</button></div></section>}
         {tab === "week" && <>
           <header className="topbar">
             <div>
@@ -220,9 +201,9 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
               <h1>A good week starts here.</h1>
             </div>
             <div className="week-nav">
-              <button aria-label="Previous week" onClick={() => router.push(`/?date=${addDays(data.week.weekStartDate, -7)}`)}>‹</button>
+              <button aria-label="Previous week" disabled={busy} onClick={() => { setBoardView("week"); void navigateWeek(addDays(data.week.weekStartDate, -7)); }}>‹</button>
               <div><span>Week of</span><strong>{formatWeekRange(data.week.weekStartDate)}</strong></div>
-              <button aria-label="Next week" onClick={() => router.push(`/?date=${addDays(data.week.weekStartDate, 7)}`)}>›</button>
+              <button aria-label="Next week" disabled={busy} onClick={() => { setBoardView("week"); void navigateWeek(addDays(data.week.weekStartDate, 7)); }}>›</button>
             </div>
           </header>
 
@@ -247,86 +228,58 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
 
           <div className="section-heading">
             <div><p className="eyebrow">THE WHOLE HOUSE</p><h2>Weekly board</h2></div>
-            <div className="action-row"><button className="secondary" onClick={() => setEditorOpen(true)}>+ One-off chore</button></div>
+            <div className="action-row"><button disabled={!data.members.length} onClick={() => setScheduleEditor({ kind: "add" })}>+ Add chore</button><button className="secondary" disabled={!data.chores.length || !data.members.length} onClick={() => setEditorOpen(true)}>One-time chore</button></div>
           </div>
-          <WeekBoard
+          <div className="action-row board-controls"><button className="secondary" aria-pressed={boardView === "week"} onClick={() => setBoardView("week")}>Week</button><button className="secondary" disabled={busy} aria-pressed={boardView === "today"} onClick={async () => { await navigateWeek(startOfWeek(today)); setBoardView("today"); }}>Today / list</button>{boardView === "today" && <label>Person<select value={listPerson} onChange={(event) => setListPerson(event.target.value)}><option value="">Everyone</option>{data.members.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}</select></label>}</div>
+          {boardView === "today" ? <ParentToday data={data} date={today} person={listPerson} busy={busy} toggleCompletion={toggleCompletion} onEdit={openSchedule} /> : <WeekBoard
             data={data}
             actorId={actorId}
             busy={busy}
             toggleCompletion={toggleCompletion}
             patchOccurrence={patchOccurrence}
-          />
+            onEdit={openSchedule}
+          />}
 
           <div className="print-section">
             <div><p className="eyebrow">PAPER, BUT SMARTER</p><h2>Print a personal chart</h2><p>Each checkbox stays connected to this exact week.</p></div>
             <div className="print-buttons">
+              <button disabled={busy || !data.members.length} onClick={() => printFor()}>Print family charts</button>
               {data.members.filter((member) => member.kind === "CHILD").map((member) =>
                 <button key={member.id} disabled={busy} onClick={() => printFor(member.id)}>▤ {member.displayName}&apos;s chart</button>
               )}
             </div>
+            {data.charts.some((chart) => chart.stale) && <p role="status">Schedule changed — print updated charts for {data.charts.filter((chart) => chart.stale).map((chart) => data.members.find((member) => member.id === chart.memberId)?.displayName).join(", ")}.</p>}
+            {printLinks.map((link) => <a key={link.url} href={link.url} target="_blank" rel="noreferrer">Open {link.name} to print →</a>)}
           </div>
         </>}
 
         {tab === "chores" && <section className="manage-page">
-          <header><p className="eyebrow">REUSABLE BUILDING BLOCKS</p><h1>Chore library</h1><p>Create each chore once, then assign it as many ways as your household needs.</p></header>
-          <div className="manage-grid">
-            <div className="panel"><h2>Chores</h2><div className="library-list">{data.chores.map((chore) => <div key={chore.id}><span className={`kind-dot ${chore.kind.toLowerCase()}`} /><strong>{chore.title}</strong><small>{chore.kind === "HOUSEHOLD" ? "One household task" : "Individual responsibility"}</small><details className="library-edit"><summary>Edit</summary><form onSubmit={(event) => editChore(event, chore.id)}><input name="title" defaultValue={chore.title} required /><input name="description" defaultValue={chore.description ?? ""} placeholder="Description" /><select name="kind" defaultValue={chore.kind}><option value="INDIVIDUAL">Individual</option><option value="HOUSEHOLD">Household</option></select><button disabled={busy}>Save</button></form></details></div>)}</div></div>
-            <form className="panel form-stack" onSubmit={(event) => submitSimple(event, "chore")}><h2>Add a chore</h2><label>Name<input name="title" required placeholder="e.g. Pack lunch" /></label><label>Description<input name="description" placeholder="Optional helpful note" /></label><label>Kind<select name="kind"><option value="INDIVIDUAL">Individual</option><option value="HOUSEHOLD">Household / global</option></select></label><button disabled={busy}>Add to library</button></form>
-          </div>
-          <form className="panel responsibility-form" onSubmit={submitResponsibility}>
-            <div><p className="eyebrow">STANDING SCHEDULE</p><h2>Add recurring responsibility</h2></div>
-            <label>Chore<select name="choreDefinitionId" required>{data.chores.map((chore) => <option value={chore.id} key={chore.id}>{chore.title}</option>)}</select></label>
-            <label>Routine<select name="routineId"><option value="">No routine</option>{data.routines.map((routine) => <option value={routine.id} key={routine.id}>{routine.name}</option>)}</select></label>
-            <label>Starts<input name="activeFrom" type="date" defaultValue={data.week.weekStartDate} required /></label>
-            <fieldset><legend>Days</legend><div className="check-row">{WEEKDAY_LABELS.map((day, index) => <label key={day}><input type="checkbox" name="weekdays" value={index} defaultChecked />{day}</label>)}</div></fieldset>
-            <fieldset><legend>Responsibility</legend><div className="segmented">{(["fixed", "rotation", "open"] as const).map((kind) => <button type="button" className={allocationKind === kind ? "selected" : ""} key={kind} onClick={() => setAllocationKind(kind)}>{kind}</button>)}</div></fieldset>
-            {allocationKind === "fixed" ? <label>Assigned to<select name="fixedMemberId">{data.members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label> : <fieldset><legend>{allocationKind === "rotation" ? "Rotation order" : "Eligible members"}</legend><div className="check-row people">{data.members.map((member) => <label key={member.id}><input type="checkbox" name="participants" value={member.id} defaultChecked />{member.displayName}</label>)}</div></fieldset>}
-            <label className="inline-check"><input type="checkbox" name="applyToCurrent" defaultChecked /> Also add its matching days to this selected week</label>
-            <button disabled={busy}>Create recurring responsibility</button>
-            <small>Future ungenerated weeks use the standing schedule automatically.</small>
-          </form>
-          <section className="panel standing-panel">
-            <div><p className="eyebrow">ACTIVE & HISTORICAL</p><h2>Standing responsibilities</h2></div>
-            <div className="standing-list">{data.responsibilities.map((responsibility) => <article className={responsibility.activeThrough ? "ended" : ""} key={responsibility.id}>
-              <div><strong>{responsibility.choreTitle}</strong><span>{responsibility.routineName ?? "Any time"} · {responsibility.allocationKind}</span></div>
-              <div className="day-pills">{responsibility.weekdays.map((day) => <i key={day}>{WEEKDAY_LABELS[day]}</i>)}</div>
-              <span>{responsibility.participantIds.map((memberId) => memberById.get(memberId)?.displayName).filter(Boolean).join(" → ") || "Any eligible member"}</span>
-              <div className="responsibility-actions">
-                {responsibility.activeThrough
-                  ? <small>Ended {responsibility.activeThrough}</small>
-                  : <form className="standing-reassign" onSubmit={(event) => reassignStandingResponsibility(event, responsibility.id, responsibility.choreTitle)}>
-                    <select name="memberId" aria-label={`New assignee for ${responsibility.choreTitle}`} defaultValue={responsibility.allocationKind === "fixed" ? responsibility.participantIds[0] : responsibility.participantIds[0] ?? data.members[0]?.id}>
-                      {data.members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}
-                    </select>
-                    <button disabled={busy}>Assign forward</button>
-                  </form>}
-                <div>
-                  {!responsibility.activeThrough && <button type="button" className="danger-link" disabled={busy} onClick={() => stopResponsibility(responsibility.id, responsibility.activeFrom)}>Stop</button>}
-                  <button type="button" className="danger-link" disabled={busy} onClick={() => deleteStandingResponsibility(responsibility.id, responsibility.choreTitle)}>Delete</button>
-                </div>
-              </div>
-            </article>)}</div>
-          </section>
+          <header><p className="eyebrow">FAMILY ROUTINES</p><h1>Chores & schedules</h1><p>Choose what needs doing, who will help, and when it happens.</p></header>
+          <ScheduleList data={data} onEdit={openSchedule} />
+          <details className="panel library-details"><summary>Manage chore names and notes ({data.chores.length})</summary><div className="library-list">{data.chores.map((chore) => <div key={chore.id}><strong>{chore.title}</strong><details className="library-edit"><summary>Edit name and note</summary><form className="form-stack" onSubmit={(event) => editChore(event, chore.id)}><label>Name<input name="title" defaultValue={chore.title} required /></label><label>Note<input name="description" defaultValue={chore.description ?? ""} /></label><input type="hidden" name="kind" value={chore.kind} /><small>Name and note changes appear in newly generated weeks. Existing weekly chores keep their saved text.</small><button disabled={busy}>Save</button></form></details></div>)}</div></details>
         </section>}
 
         {tab === "family" && <section className="manage-page">
-          <header><p className="eyebrow">YOUR HOUSEHOLD</p><h1>Everyone can pitch in.</h1><p>Children and adults share the same responsibility model, with a simpler view for kids.</p></header>
-          <div className="family-grid">{data.members.map((member) => <div className={`family-card theme-${member.themeKey}`} key={member.id}><Avatar name={member.displayName} theme={member.themeKey} large /><h2>{member.displayName}</h2><span>{member.kind.toLowerCase()}</span><label>Theme<select value={member.themeKey} disabled={busy} onChange={(event) => editMember(member.id, { themeKey: event.target.value })}><ThemeOptions /></select></label>{member.kind === "CHILD" && <Link href={`/kid/${member.id}`}>Open Today view →</Link>}<button type="button" className="member-remove" disabled={busy} onClick={() => removeHouseholdMember(member.id, member.displayName)}>Remove member</button></div>)}</div>
+          <header><p className="eyebrow">YOUR HOUSEHOLD</p><h1>Everyone can pitch in.</h1><p>Manage everyone’s chores and routines in one place.</p></header>
+          <div className="family-grid">{data.members.map((member) => <div className={`family-card theme-${member.themeKey}`} key={member.id}><Avatar name={member.displayName} theme={member.themeKey} large /><h2>{member.displayName}</h2><span>{member.kind.toLowerCase()}</span><label>Theme<select value={member.themeKey} disabled={busy} onChange={(event) => editMember(member.id, { themeKey: event.target.value })}><ThemeOptions /></select></label>{member.kind === "CHILD" && <Link href={`/kid/${member.id}`}>Open Today view →</Link>}<button className="secondary" onClick={() => setFamilyMember(member.id)}>Manage chores</button><button type="button" className="member-remove" disabled={busy} onClick={() => removeHouseholdMember(member.id, member.displayName)}>Remove member</button></div>)}</div>
+          {familyMember && <section className="family-schedule"><h2>{data.members.find((member) => member.id === familyMember)?.displayName}&apos;s schedule</h2><ScheduleList key={familyMember} data={data} memberId={familyMember} onEdit={openSchedule} /></section>}
           <form className="panel form-stack narrow" onSubmit={(event) => submitSimple(event, "member")}><h2>Add household member</h2><label>Name<input name="displayName" required /></label><label>Member type<select name="kind"><option value="CHILD">Child</option><option value="ADULT">Adult</option><option value="OTHER">Other</option></select></label><label>Theme<select name="themeKey"><ThemeOptions /></select></label><label className="inline-check"><input type="checkbox" name="canAdminister" /> Can administer schedules</label><button disabled={busy}>Add member</button></form>
         </section>}
       </section>
 
-      {editorOpen && <div className="modal-backdrop" onMouseDown={() => setEditorOpen(false)}><form className="modal form-stack" onSubmit={submitOneOff} onMouseDown={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setEditorOpen(false)}>×</button><p className="eyebrow">JUST THIS WEEK</p><h2>Add a one-off chore</h2><label>Chore<select name="choreDefinitionId">{data.chores.map((chore) => <option key={chore.id} value={chore.id}>{chore.title}</option>)}</select></label><label>Day<input type="date" name="dueDate" min={data.week.weekStartDate} max={addDays(data.week.weekStartDate, 6)} required /></label><label>Assign to<select name="memberId"><option value="">Leave open</option>{data.members.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}</select></label><label>Routine<select name="routineId"><option value="">No routine</option>{data.routines.map((routine) => <option key={routine.id} value={routine.id}>{routine.name}</option>)}</select></label><button disabled={busy}>Add to this week</button></form></div>}
+      {scheduleEditor && <ScheduleDialog data={data} editor={scheduleEditor} onClose={() => setScheduleEditor(null)} onSaved={async () => { await refresh(); setNotice("Family schedules updated."); }} />}
+      {editorOpen && <div className="modal-backdrop" onMouseDown={() => setEditorOpen(false)}><form className="modal form-stack" onSubmit={submitOneOff} onMouseDown={(event) => event.stopPropagation()}><button type="button" className="modal-close" onClick={() => setEditorOpen(false)}>×</button><p className="eyebrow">JUST THIS WEEK</p><h2>Add a one-off chore</h2><label>Chore<select name="choreDefinitionId">{data.chores.map((chore) => <option key={chore.id} value={chore.id}>{chore.title}</option>)}</select></label><label>Day<input type="date" name="dueDate" defaultValue={data.week.dates.includes(today) ? today : data.week.weekStartDate} min={data.week.weekStartDate} max={addDays(data.week.weekStartDate, 6)} required /></label><label>Assign to<select name="memberId"><option value="">Leave open</option>{data.members.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}</select></label><label>Routine<select name="routineId"><option value="">No routine</option>{data.routines.map((routine) => <option key={routine.id} value={routine.id}>{routine.name}</option>)}</select></label><button disabled={busy}>Add to this week</button></form></div>}
     </main>
   );
 }
 
-function WeekBoard({ data, actorId, busy, toggleCompletion, patchOccurrence }: {
+function WeekBoard({ data, actorId, busy, toggleCompletion, patchOccurrence, onEdit }: {
   data: DashboardSnapshot;
   actorId: string;
   busy: boolean;
   toggleCompletion: (occurrence: WeekOccurrence, memberId?: string) => Promise<void>;
   patchOccurrence: (id: string, payload: object) => Promise<void>;
+  onEdit: (editor: ScheduleEditor) => void;
 }) {
   const lanes = [...data.members.map((member) => ({ id: member.id, label: member.displayName, theme: member.themeKey })), { id: "open", label: "Household", theme: "sunny" }];
   return <div className="board-wrap"><div className="week-board">
@@ -340,10 +293,11 @@ function WeekBoard({ data, actorId, busy, toggleCompletion, patchOccurrence }: {
           <button className="check-button" disabled={busy || item.status === "CANCELLED"} onClick={() => toggleCompletion(item, lane.id === "open" ? actorId : lane.id)} aria-label={`Mark ${item.choreTitle} ${item.completionId ? "not complete" : "complete"}`}>{item.completionId ? "✓" : ""}</button>
           <div><strong>{item.choreTitle}</strong><small>{item.routineName ?? (item.origin === "ONE_OFF" ? "One-off" : "Any time")}</small></div>
           <details><summary>•••</summary><div className="chip-menu">
-            <label>Assign<select value={item.assigneeId ?? ""} onChange={(event) => patchOccurrence(item.id, { action: "reassign", memberId: event.target.value || null })}><option value="">Open</option>{data.members.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}</select></label>
-            <label>Move to<select value={item.dueDate} onChange={(event) => patchOccurrence(item.id, { action: "move", dueDate: event.target.value })}>{data.week.dates.map((day, dayIndex) => <option value={day} key={day}>{WEEKDAY_LABELS[dayIndex]} {Number(day.slice(-2))}</option>)}</select></label>
+            <small>Just this occurrence</small><label>Assign<select disabled={busy} value={item.assigneeId ?? ""} onChange={(event) => patchOccurrence(item.id, { action: "reassign", memberId: event.target.value || null })}><option value="">Open</option>{data.members.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}</select></label>
+            <label>Move to<select disabled={busy} value={item.dueDate} onChange={(event) => patchOccurrence(item.id, { action: "move", dueDate: event.target.value })}>{data.week.dates.map((day, dayIndex) => <option value={day} key={day}>{WEEKDAY_LABELS[dayIndex]} {Number(day.slice(-2))}</option>)}</select></label>
             <div className="order-buttons"><button onClick={() => patchOccurrence(item.id, { action: "reorder", sortOrder: item.sortOrder - 15 })}>Move earlier</button><button onClick={() => patchOccurrence(item.id, { action: "reorder", sortOrder: item.sortOrder + 15 })}>Move later</button></div>
-            <button onClick={() => patchOccurrence(item.id, { action: item.status === "CANCELLED" ? "restore" : "cancel" })}>{item.status === "CANCELLED" ? "Restore" : "Skip this week"}</button>
+            <button onClick={() => patchOccurrence(item.id, { action: item.status === "CANCELLED" ? "restore" : "cancel" })}>{item.status === "CANCELLED" ? "Restore" : "Skip this occurrence"}</button>
+            {item.sourceTemplateId && <button disabled={busy} onClick={() => onEdit({ kind: "edit", templateId: item.sourceTemplateId!, date: item.dueDate })}>Edit this and future occurrences…</button>}
           </div></details>
         </article>)}</div>;
       })}
@@ -384,5 +338,17 @@ function SetupScreen() {
       setBusy(false);
     }
   }
-  return <main className="setup-page"><div className="setup-art"><div className="sun" /><span className="house">⌂</span><div><p className="eyebrow">WELCOME HOME</p><h1>Meet Tidy Week.</h1><p>A calm, cheerful place for everyone&apos;s chores—and a paper chart that actually belongs in the kitchen.</p></div></div><div className="setup-card"><h2>Create your household</h2><p>You can start clean or load a realistic sample family.</p>{error && <div className="error-banner">{error}</div>}<form className="form-stack" onSubmit={create}><label>Household name<input name="name" required placeholder="The Rivera Family" /></label><label>Timezone<input name="timezone" required defaultValue="America/Los_Angeles" /></label><button disabled={busy}>Create household</button></form><div className="or"><span>or</span></div><button className="secondary full" disabled={busy} onClick={seed}>Explore with demo data</button><small>Demo data is available only in development.</small></div></main>;
+  return <main className="setup-page"><div className="setup-art"><div className="sun" /><span className="house">⌂</span><div><p className="eyebrow">WELCOME HOME</p><h1>Meet Tidy Week.</h1><p>A calm, cheerful place for everyone&apos;s chores—and a paper chart that actually belongs in the kitchen.</p></div></div><div className="setup-card"><h2>Create your household</h2><p>You can start clean or load a realistic sample family.</p>{error && <div className="error-banner">{error}</div>}<form className="form-stack" onSubmit={create}><label>Household name<input name="name" required placeholder="The Rivera Family" /></label><label>Timezone<input name="timezone" required defaultValue={Intl.DateTimeFormat().resolvedOptions().timeZone} /></label><button disabled={busy}>Create household</button></form><div className="or"><span>or</span></div><button className="secondary full" disabled={busy} onClick={seed}>Explore with demo data</button><small>Demo data is available only in development.</small></div></main>;
+}
+
+function ParentToday({ data, date, person, busy, toggleCompletion, onEdit }: {
+  data: DashboardSnapshot; date: ISODate; person: string; busy: boolean;
+  toggleCompletion: (occurrence: WeekOccurrence, memberId?: string) => Promise<void>;
+  onEdit: (editor: ScheduleEditor) => void;
+}) {
+  const items = data.week.occurrences.filter((item) => item.dueDate === date && item.status === "SCHEDULED" && (!person || item.assigneeId === person || !item.assigneeId && (!item.eligibleMemberIds.length || item.eligibleMemberIds.includes(person))));
+  return <section className="panel today-list"><h2>Today · {date}</h2>{items.length === 0 && <p>Nothing scheduled today.</p>}{[...data.routines.map((routine) => routine.name), "Any time"].map((routine) => {
+    const chores = items.filter((item) => (item.routineName ?? "Any time") === routine);
+    return chores.length > 0 && <section key={routine}><h3>{routine}</h3>{chores.map((item) => <article className="today-row" key={item.id}><button className="check-button" disabled={busy} onClick={() => toggleCompletion(item, item.assigneeId ?? (person || undefined))} aria-label={`Mark ${item.choreTitle} ${item.completionId ? "not complete" : "complete"}`}>{item.completionId ? "✓" : ""}</button><div><strong>{item.choreTitle}</strong><small>{data.members.find((member) => member.id === item.assigneeId)?.displayName ?? "Anyone eligible"}</small></div>{item.sourceTemplateId && <button className="secondary" onClick={() => onEdit({ kind: "edit", templateId: item.sourceTemplateId!, date })}>Edit schedule</button>}</article>)}</section>;
+  })}</section>;
 }

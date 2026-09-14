@@ -5,13 +5,13 @@ Tidy Week is a self-hosted family chore tracker. The web application is the sour
 ## What works today
 
 - Children, parents, and other adults share one household-member model.
-- Reusable chore definitions are separate from recurring responsibilities.
-- Responsibilities can be fixed, deterministically rotated, or left open to eligible members.
-- Sunday–Saturday weeks are generated from standing schedules and then edited independently.
+- One Add chore flow assigns new or existing chores to several people, with bulk selection and schedule copying.
+- Chores can be individual, rotated by chore day or scheduled week, or open to selected members.
+- Effective-dated schedule edits preview their impact and update upcoming weeks while preserving history and manual exceptions.
 - One-off chores, week-only cancellation, moving, reassignment, ordering, completion, undo, and correction are supported.
-- The parent board, Chore Library, Family profiles, and touch-friendly Kid Today view are implemented.
+- The weekly board, mobile parent Today list, family routine profiles, guided setup, and touch-friendly Kid Today view are implemented.
 - Sunny, Space, Ocean, Italy, Cats, Sharks, and Sharks & Dinos themes work on digital and printable surfaces.
-- Issued charts have immutable snapshots, QR codes, checksums, and occurrence-linked checkbox manifests.
+- Individual and family printing preserve immutable chart snapshots and flag charts needing updates; QR codes, checksums, and checkbox manifests remain linked to occurrences.
 - SQLite persistence, deterministic seed data, health checks, production containers, deployment rollback, and consistent backups are included.
 
 V1 is intended for a trusted home LAN. Attribution is recorded, but there is no security-grade authentication. Do not expose it directly to the public internet.

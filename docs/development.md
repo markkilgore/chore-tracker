@@ -100,3 +100,20 @@ Native dependency compilation tools are installed only in that transient build s
 ## Generated and local-only files
 
 The root `.gitignore` excludes npm/Next outputs, TypeScript caches, local databases, environment files, production data directories, logs, test reports, editor settings, and common OS metadata. `.env.example` remains tracked; real `.env*` files do not.
+
+
+## Family schedule browser walkthrough
+
+The checked-in Playwright script requires an **empty disposable local database** and refuses to run against a populated household. After installing Chromium and building, start a temporary server in one terminal (choose a new database filename for each run):
+
+```bash
+APP_ENV=development DATABASE_PATH=/tmp/tidy-schedule-browser.sqlite APP_ORIGIN=http://127.0.0.1:3014 npm run start -w @chore-tracker/web -- -p 3014 -H 127.0.0.1
+```
+
+In another terminal:
+
+```bash
+SCHEDULE_TEST_URL=http://127.0.0.1:3014 node apps/web/e2e/schedules.mjs
+```
+
+The walkthrough covers household setup, members, multi-person assignment, rotation order/cadence, recurring edits, duplicate-safe and adjusted schedule copies, family printing, stops, stale-chart notices, and the mobile editor. Screenshots are written under `/tmp/tidy-schedules-*.png`. Unit tests also cover atomic failure, preview rollback, idempotent retries, stale previews, historical generation, and preservation of completed/manual work through repeated edits.
