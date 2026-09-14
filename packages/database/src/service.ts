@@ -2,6 +2,9 @@ import type { ScheduleChange, ScheduleDraft } from "@chore-tracker/contracts";
 import { createHash, randomUUID } from "node:crypto";
 import {
   addDays,
+  chartRowsPerPage,
+  weeklySpeciesLesson,
+  type SpeciesLesson,
   dateInTimeZone,
   daysBetween,
   generateWeekOccurrences,
@@ -15,6 +18,8 @@ import {
   type ResponsibilityTemplate
 } from "@chore-tracker/domain";
 import { getSqlite, type SqliteDatabase, withImmediateTransaction } from "./db";
+
+import { speciesPhoto, type SpeciesPhoto } from "./species-photo";
 
 const now = () => new Date().toISOString();
 const id = () => randomUUID();
@@ -127,6 +132,8 @@ export interface ChartSnapshot {
   themeKey: string;
   planRevision: number;
   rows: ChartRow[];
+  layoutVersion?: 1 | 2;
+  speciesLesson?: SpeciesLesson & { photo: SpeciesPhoto };
 }
 
 type Row = Record<string, unknown>;
@@ -853,13 +860,17 @@ export function createChartExport(planId: string, memberId: string, themeKey?: s
     planRevision: plan.revision,
     rows
   };
+  const lesson = weeklySpeciesLesson(snapshot.themeKey, snapshot.weekStartDate);
+  snapshot.layoutVersion = lesson ? 2 : 1;
+  if (lesson) snapshot.speciesLesson = { ...lesson, photo: speciesPhoto(lesson.speciesId) };
+  const rowsPerPage = chartRowsPerPage(snapshot.layoutVersion);
   const cellManifest = rows.flatMap((row, rowIndex) => row.cells
     .map((cell, dayIndex) => cell.occurrenceId ? ({
       occurrenceId: cell.occurrenceId,
-      page: Math.floor(rowIndex / 18) + 1,
-      row: rowIndex % 18,
+      page: Math.floor(rowIndex / rowsPerPage) + 1,
+      row: rowIndex % rowsPerPage,
       column: dayIndex,
-      box: { x: 3.265 + dayIndex * 0.711, y: 2.43 + (rowIndex % 18) * 0.42, width: 0.22, height: 0.22 }
+      box: { x: 3.265 + dayIndex * 0.711, y: 2.43 + (rowIndex % rowsPerPage) * 0.42, width: 0.22, height: 0.22 }
     }) : null)
     .filter(Boolean));
   const serialized = JSON.stringify(snapshot);
@@ -868,7 +879,7 @@ export function createChartExport(planId: string, memberId: string, themeKey?: s
     INSERT INTO chart_exports(
       id, household_id, weekly_plan_id, member_id, plan_revision, theme_key, theme_version,
       layout_version, content_snapshot_json, cell_manifest_json, checksum, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 1, 1, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
   `).run(
     chartId,
     plan.householdId,
@@ -876,6 +887,7 @@ export function createChartExport(planId: string, memberId: string, themeKey?: s
     memberId,
     plan.revision,
     snapshot.themeKey,
+    snapshot.layoutVersion,
     serialized,
     JSON.stringify(cellManifest),
     checksum,

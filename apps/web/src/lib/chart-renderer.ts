@@ -1,3 +1,4 @@
+import { chartRowsPerPage } from "@chore-tracker/domain";
 import type { ChartSnapshot } from "@chore-tracker/database";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -45,6 +46,17 @@ export const PRINT_CSS = `
   .box { width: .22in; height: .22in; border: 2px solid #596963; border-radius: 4px; margin: auto; display: grid; place-items: center; background: white; color: var(--accent); box-shadow: inset 0 0 0 1px rgba(255,255,255,.9); font-weight: 900; font-size: 14px; line-height: 1; }
   .theme-cats .box { border-radius: 6px; }
   .empty { color: #c7cbc8; font-size: 12px; }
+  .species-card { position: absolute; bottom: .65in; left: .5in; right: .5in; height: 2.25in; padding: .12in; border: 1px solid var(--accent); border-radius: 12px; background: var(--row); display: grid; grid-template-columns: 2.15in 1fr; gap: .16in; }
+  .species-card figure { margin: 0; }
+  .species-photo { display: block; width: 2.15in; height: 1.65in; object-fit: contain; background: white; border-radius: 7px; }
+  .species-card figcaption { font-size: 7px; line-height: 1.3; margin-top: 4px; }
+  .species-card a { color: inherit; text-decoration: underline; }
+  .species-copy .kicker { margin-bottom: 4px; font-size: 9px; }
+  .species-copy h2 { margin: 0; font: bold 23px Georgia, serif; }
+  .species-copy .scientific-name { font-size: 9px; font-style: italic; margin: 2px 0 6px; color: #52615b; }
+  .species-copy h3 { margin: 0 0 4px; font-size: 12px; color: var(--accent); }
+  .species-copy p { font-size: 13px; line-height: 1.35; margin: 0 0 6px; }
+  .species-copy .species-source { font-size: 8px; margin-bottom: 0; }
   .page-footer { position: absolute; bottom: .3in; left: .5in; right: .5in; padding-top: 5px; border-top: 1px solid var(--soft); display: flex; justify-content: space-between; color: #76817c; font-size: 7px; letter-spacing: .06em; }
   .corner-marker { position: absolute; width: 7px; height: 7px; background: #252525; }
   .corner-marker.tl { left: .18in; top: .18in; } .corner-marker.tr { right: .18in; top: .18in; }
@@ -92,8 +104,10 @@ function prettyWeek(date: string): string {
 export async function renderChartHtml(snapshot: ChartSnapshot, checksum: string, includeToolbar = false): Promise<string> {
   const qr = await QRCode.toDataURL(`chorechart:v1:${snapshot.chartId}:${checksum}`, { margin: 0, width: 128, errorCorrectionLevel: "M" });
   const themeArtwork = await themeArtworkDataUrl(snapshot.themeKey);
-  const pages = Array.from({ length: Math.max(1, Math.ceil(snapshot.rows.length / 18)) }, (_, index) =>
-    snapshot.rows.slice(index * 18, index * 18 + 18)
+  const rowsPerPage = chartRowsPerPage(snapshot.layoutVersion);
+  const lesson = snapshot.speciesLesson;
+  const pages = Array.from({ length: Math.max(1, Math.ceil(snapshot.rows.length / rowsPerPage)) }, (_, index) =>
+    snapshot.rows.slice(index * rowsPerPage, index * rowsPerPage + rowsPerPage)
   );
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const content = pages.map((rows, pageIndex) => `<section class="chart-page theme-${escape(snapshot.themeKey)}${themeArtwork ? " has-art" : ""}">
@@ -106,7 +120,11 @@ export async function renderChartHtml(snapshot: ChartSnapshot, checksum: string,
     <table><thead><tr><th>Chore</th>${dayLabels.map((day) => `<th>${day}</th>`).join("")}</tr></thead><tbody>
       ${rows.length ? rows.map((row) => `<tr><td class="chore-name"><strong>${escape(row.title)}</strong><small>${escape(row.routineName ?? "Any time")}</small></td>${row.cells.map((cell) => cell.occurrenceId ? `<td data-occurrence-id="${escape(cell.occurrenceId)}"><span class="box">${cell.completed ? "✓" : ""}</span></td>` : `<td class="empty">—</td>`).join("")}</tr>`).join("") : `<tr><td class="chore-name"><strong>No chores scheduled</strong><small>Enjoy the week!</small></td>${dayLabels.map(() => `<td class="empty">—</td>`).join("")}</tr>`}
     </tbody></table>
-    <footer class="page-footer"><span>TIDY WEEK · ${escape(snapshot.householdName)}</span><span>Layout v1 · ${pageIndex + 1}/${pages.length} · ${escape(checksum)}</span></footer>
+    ${lesson ? `<aside class="species-card" aria-label="Species of the week">
+      <figure><img class="species-photo" src="${escape(lesson.photo.dataUrl)}" alt="${escape(lesson.name)} (${escape(lesson.scientificName)})" /><figcaption>Photo: <a href="${escape(lesson.photo.pageUrl)}">${escape(lesson.photo.credit)}</a> · <a href="${escape(lesson.photo.licenseUrl)}">${escape(lesson.photo.license)}</a><br/>Wikimedia Commons · uncropped thumbnail</figcaption></figure>
+      <div class="species-copy"><p class="kicker">${lesson.theme === "cats" ? "WILD CAT" : "SHARK"} OF THE WEEK</p><h2>${escape(lesson.name)}</h2><p class="scientific-name">${escape(lesson.scientificName)}</p><h3>${escape(lesson.title)}</h3><p>${escape(lesson.fact)}</p><p><strong>Wonder together:</strong> ${escape(lesson.question)}</p><p class="species-source">Learn more: <a href="${escape(lesson.sourceUrl)}">${escape(lesson.sourceName)}</a></p></div>
+    </aside>` : ""}
+    <footer class="page-footer"><span>TIDY WEEK · ${escape(snapshot.householdName)}</span><span>Layout v${snapshot.layoutVersion ?? 1} · ${pageIndex + 1}/${pages.length} · ${escape(checksum)}</span></footer>
   </section>`).join("");
   const toolbar = includeToolbar ? `<div class="download-bar"><a href="/">← Family board</a><a href="/api/v1/chart-exports/${snapshot.chartId}/pdf">Download PDF</a></div>` : "";
   return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><title>${escape(snapshot.memberName)}’s Chore Chart</title><style>${PRINT_CSS}</style></head><body>${toolbar}${content}</body></html>`;

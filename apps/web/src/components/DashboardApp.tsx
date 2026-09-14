@@ -2,7 +2,7 @@
 
 import type { DashboardSnapshot, WeekOccurrence } from "@chore-tracker/database";
 import { THEME_OPTIONS } from "@chore-tracker/contracts/themes";
-import { addDays, dateInTimeZone, startOfWeek, formatWeekRange, WEEKDAY_LABELS, type ISODate } from "@chore-tracker/domain";
+import { addDays, dateInTimeZone, startOfWeek, formatWeekRange, weeklySpeciesLesson, WEEKDAY_LABELS, type ISODate } from "@chore-tracker/domain";
 import Link from "next/link";
 import { ScheduleDialog, ScheduleList, type ScheduleEditor } from "./Schedules";
 import { FormEvent, useEffect, useState } from "react";
@@ -248,6 +248,10 @@ export function DashboardApp({ initial }: { initial: DashboardSnapshot | null })
                 <button key={member.id} disabled={busy} onClick={() => printFor(member.id)}>▤ {member.displayName}&apos;s chart</button>
               )}
             </div>
+            {data.members.some((member) => weeklySpeciesLesson(member.themeKey, data.week.weekStartDate)) && <p>This week&apos;s photo lessons: {data.members.flatMap((member) => {
+              const lesson = weeklySpeciesLesson(member.themeKey, data.week.weekStartDate);
+              return lesson ? [`${member.displayName}: ${lesson.name}`] : [];
+            }).join(" · ")}. Included automatically on new charts.</p>}
             {data.charts.some((chart) => chart.stale) && <p role="status">Schedule changed — print updated charts for {data.charts.filter((chart) => chart.stale).map((chart) => data.members.find((member) => member.id === chart.memberId)?.displayName).join(", ")}.</p>}
             {printLinks.map((link) => <a key={link.url} href={link.url} target="_blank" rel="noreferrer">Open {link.name} to print →</a>)}
           </div>

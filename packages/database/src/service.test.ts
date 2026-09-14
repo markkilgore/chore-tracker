@@ -38,6 +38,33 @@ describe("SQLite application model", () => {
     fs.rmSync(directory, { recursive: true, force: true });
   });
 
+  it("freezes weekly lessons and photos with layout-aware checkbox manifests", () => {
+    const dashboard = getDashboard("2026-09-13", db)!;
+    const kate = dashboard.members.find((member) => member.displayName === "Kate")!;
+    let week = dashboard.week;
+    for (let index = 0; index < 13; index++) {
+      week = addOneOff(week.id, { choreDefinitionId: dashboard.chores[0].id,
+        dueDate: week.weekStartDate, memberId: kate.id, expectedRevision: week.revision }, db);
+    }
+    const chartId = createChartExport(week.id, kate.id, undefined, db);
+    const issued = getChartExport(chartId, db);
+    expect(issued.snapshot.speciesLesson?.speciesId).toBe("sand-cat");
+    expect(issued.snapshot.speciesLesson?.photo.dataUrl).toMatch(/^data:image\/jpeg;base64,/);
+    expect(issued.snapshot.layoutVersion).toBe(2);
+    const manifest = issued.manifest as Array<{ page: number; row: number; box: { y: number } }>;
+    expect(manifest.some((cell) => cell.page === 2)).toBe(true);
+    expect(manifest.every((cell) => cell.row < 12)).toBe(true);
+    expect(manifest.find((cell) => cell.page === 2 && cell.row === 0)?.box.y).toBe(2.43);
+    expect(db.prepare("SELECT layout_version FROM chart_exports WHERE id = ?").get(chartId)).toEqual({ layout_version: 2 });
+    const next = materializeWeek(dashboard.household.id, "2026-09-20", db);
+    const nextChart = getChartExport(createChartExport(next.id, kate.id, undefined, db), db);
+    expect(nextChart.snapshot.speciesLesson?.speciesId).toBe("fishing-cat");
+    expect(getChartExport(chartId, db)).toEqual(issued);
+    const plain = getChartExport(createChartExport(week.id, kate.id, "sunny", db), db);
+    expect(plain.snapshot.speciesLesson).toBeUndefined();
+    expect(plain.snapshot.layoutVersion).toBe(1);
+  });
+
   it("materializes a week idempotently", () => {
     const dashboard = getDashboard(undefined, db)!;
     const first = materializeWeek(dashboard.household.id, dashboard.week.weekStartDate, db);
