@@ -7,6 +7,8 @@ assert.equal(await (await fetch(`${base}/api/v1/dashboard`)).json(), null, "Brow
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 page.setDefaultTimeout(10000);
+// Localhost is a secure context. Remove this secure-only API to cover plain LAN HTTP.
+await page.addInitScript(() => { Object.defineProperty(crypto, "randomUUID", { value: undefined, configurable: true }); });
 const errors = [];
 page.on("pageerror", (error) => errors.push(error.message));
 const dialog = page.getByRole("dialog");

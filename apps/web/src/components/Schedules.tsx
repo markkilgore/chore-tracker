@@ -5,6 +5,16 @@ import type { ScheduleChange, ScheduleDraft } from "@chore-tracker/contracts";
 import { addDays, dateInTimeZone, startOfWeek, WEEKDAY_LABELS, type ISODate } from "@chore-tracker/domain";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
+// getRandomValues is available on trusted home-LAN HTTP origins as well as HTTPS.
+// randomUUID requires a secure context, which direct LAN addresses do not provide.
+function newRequestId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export type ScheduleEditor = { kind: "add" | "edit" | "copy" | "stop"; memberId?: string; templateId?: string; date?: ISODate };
 export function draftFor(schedule: ResponsibilitySummary): ScheduleDraft {
   return { choreDefinitionId: schedule.choreDefinitionId, routineId: schedule.routineId, mode: schedule.allocationKind === "fixed" ? "each" : schedule.allocationKind,
@@ -64,7 +74,7 @@ export function ScheduleDialog({ data, editor, onClose, onSaved }: { data: Dashb
   const [reviewed, setReviewed] = useState<ScheduleChange | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const requestId = useRef(crypto.randomUUID());
+  const requestId = useRef(newRequestId());
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current!;
@@ -111,7 +121,7 @@ export function ScheduleDialog({ data, editor, onClose, onSaved }: { data: Dashb
         <div className="review-impact" role="status"><strong>In weeks already on the board</strong><p>{impact.added} added · {impact.updated} updated · {impact.removed} removed across {impact.weeks} weeks.</p><p>Keep {impact.keptCompleted} chores with completion history and {impact.keptExceptions} manually changed chores.</p>{impact.duplicatesSkipped > 0 && <p>{impact.duplicatesSkipped} matching assignments already exist and will be skipped.</p>}{impact.charts > 0 && <p>{impact.charts} printed charts will need updating.</p>}</div>
         <p>Future weeks will follow the same schedule. Completed chores and manual exceptions keep their current dates and assignments.</p>
         {impact.examples.length > 0 && <details><summary>See the next two weeks of the recurring schedule</summary><ul className="preview-dates">{impact.examples.map((example, index) => <li key={index}>{example.date} · {example.title} · {example.person}</li>)}</ul><small>Existing completed chores and manual exceptions take precedence.</small></details>}
-        <div className="action-row"><button type="button" className="secondary" disabled={busy} onClick={() => { setImpact(null); setReviewed(null); requestId.current = crypto.randomUUID(); }}>Back to editing</button><button disabled={busy}>{busy ? "Saving…" : "Save changes"}</button></div>
+        <div className="action-row"><button type="button" className="secondary" disabled={busy} onClick={() => { setImpact(null); setReviewed(null); requestId.current = newRequestId(); }}>Back to editing</button><button disabled={busy}>{busy ? "Saving…" : "Save changes"}</button></div>
       </> : <>
         <fieldset disabled={busy} className="form-stack editor-fields">
           <label>{editor.kind === "stop" || editor.kind === "edit" ? "Apply changes" : "Start"}<select value={dateChoice} onChange={(event) => { const value = event.target.value; setDateChoice(value); if (value !== "custom") setEffective(value === "today" ? today : addDays(startOfWeek(today), 7)); }}><option value="today" disabled={Boolean(original?.supersedesTemplateId && original.activeFrom > today)}>Starting today</option><option value="next" disabled={Boolean(original?.supersedesTemplateId && original.activeFrom > addDays(startOfWeek(today), 7))}>Starting next week</option><option value="custom">Choose a date</option></select></label>
