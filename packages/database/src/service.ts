@@ -4,6 +4,7 @@ import {
   addDays,
   chartRowsPerPage,
   chartCheckboxBox,
+  insetChartBox,
   weeklySpeciesLesson,
   type SpeciesLesson,
   dateInTimeZone,
@@ -133,7 +134,7 @@ export interface ChartSnapshot {
   themeKey: string;
   planRevision: number;
   rows: ChartRow[];
-  layoutVersion?: 1 | 2 | 3;
+  layoutVersion?: 1 | 2 | 3 | 4;
   speciesLesson?: SpeciesLesson & { photo: SpeciesPhoto };
 }
 
@@ -863,7 +864,7 @@ export function createChartExport(planId: string, memberId: string, themeKey?: s
     rows
   };
   const lesson = weeklySpeciesLesson(snapshot.themeKey, snapshot.weekStartDate);
-  snapshot.layoutVersion = 3;
+  snapshot.layoutVersion = 4;
   if (lesson) snapshot.speciesLesson = { ...lesson, photo: speciesPhoto(lesson.speciesId) };
   const rowsPerPage = chartRowsPerPage(snapshot.layoutVersion);
   const cellManifest = rows.flatMap((row, rowIndex) => row.cells
@@ -872,7 +873,7 @@ export function createChartExport(planId: string, memberId: string, themeKey?: s
       page: Math.floor(rowIndex / rowsPerPage) + 1,
       row: rowIndex % rowsPerPage,
       column: dayIndex,
-      box: chartCheckboxBox(Math.min(rowsPerPage, rows.length - Math.floor(rowIndex / rowsPerPage) * rowsPerPage), rowIndex % rowsPerPage, dayIndex)
+      box: insetChartBox(chartCheckboxBox(Math.min(rowsPerPage, rows.length - Math.floor(rowIndex / rowsPerPage) * rowsPerPage), rowIndex % rowsPerPage, dayIndex))
     }) : null)
     .filter(Boolean));
   const serialized = JSON.stringify(snapshot);

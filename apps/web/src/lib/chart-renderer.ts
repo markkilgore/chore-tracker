@@ -1,4 +1,4 @@
-import { chartRowsPerPage, chartPageGeometry } from "@chore-tracker/domain";
+import { chartRowsPerPage, chartPageGeometry, PRINT_INSET, PRINT_SCALE } from "@chore-tracker/domain";
 import type { ChartSnapshot } from "@chore-tracker/database";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
@@ -9,6 +9,9 @@ export const PRINT_CSS = `
   * { box-sizing: border-box; }
   body { margin: 0; color: #25332f; background: #e9e7e0; font-family: "Trebuchet MS", Arial, sans-serif; }
   .chart-page { --accent: #d77a42; --soft: #f8e2c9; --row: #fff9f1; --ornament: "☀"; width: 8.5in; min-height: 11in; margin: 20px auto; padding: .5in; background: #fffdf8; position: relative; overflow: hidden; page-break-after: always; box-shadow: inset 0 .07in 0 var(--accent); }
+  .print-sheet { width: 8.5in; height: 11in; padding: ${PRINT_INSET}in; margin: 20px auto; background: white; page-break-after: always; overflow: hidden; }
+  .print-sheet:last-child { page-break-after: auto; }
+  .print-sheet > .chart-page { zoom: ${PRINT_SCALE}; margin: 0; page-break-after: auto; }
   .chart-page:last-child { page-break-after: auto; }
   .chart-page:before { content: ""; position: absolute; width: 2.1in; height: 2.1in; border-radius: 50%; right: -.75in; top: -.85in; background: var(--soft); }
   .chart-page:after { content: var(--ornament); position: absolute; right: .55in; top: .28in; font: bold 36px Georgia, serif; color: var(--accent); transform: rotate(9deg); }
@@ -87,7 +90,7 @@ export const PRINT_CSS = `
   .corner-marker.bl { left: .18in; bottom: .18in; } .corner-marker.br { right: .18in; bottom: .18in; }
   .download-bar { width: 8.5in; margin: 20px auto; display: flex; justify-content: flex-end; gap: 8px; }
   .download-bar a { color: white; background: #2e795f; border-radius: 9px; text-decoration: none; font-weight: bold; padding: 10px 15px; }
-  @media print { body { background: white; } .chart-page { margin: 0; } .download-bar { display: none; } }
+  @media print { body { background: white; } .chart-page, .print-sheet { margin: 0; } .download-bar { display: none; } }
 `;
 
 const THEME_ART_FILES: Record<string, string> = {
@@ -135,10 +138,11 @@ export async function renderChartHtml(snapshot: ChartSnapshot, checksum: string,
   );
   const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const content = pages.map((rows, pageIndex) => {
-    const modern = snapshot.layoutVersion === 3;
+    const modern = (snapshot.layoutVersion ?? 1) >= 3;
+    const inset = snapshot.layoutVersion === 4;
     const geometry = chartPageGeometry(rows.length, Boolean(lesson));
     const style = modern ? ` style="--row-height:${geometry.rowHeight}in;--box-size:${geometry.boxSize}in;--chore-font:${rows.length <= 4 ? 16 : rows.length <= 8 ? 14 : 11}px;--lesson-top:${geometry.lessonTop}in;--lesson-height:${geometry.lessonHeight}in"` : "";
-    return `<section class="chart-page theme-${escape(snapshot.themeKey)}${themeArtwork ? " has-art" : ""}${modern ? ` layout-v3${geometry.stacked ? " lesson-stacked" : ""}` : ""}"${style}>
+    return `${inset ? '<div class="print-sheet">' : ""}<section class="chart-page theme-${escape(snapshot.themeKey)}${themeArtwork ? " has-art" : ""}${modern ? ` layout-v3${geometry.stacked ? " lesson-stacked" : ""}` : ""}"${style}>
     <i class="corner-marker tl"></i><i class="corner-marker tr"></i><i class="corner-marker bl"></i><i class="corner-marker br"></i>
     <header class="chart-header">
       ${themeArtwork ? `<img class="theme-art" src="${themeArtwork}" alt="" />` : ""}
@@ -153,7 +157,7 @@ export async function renderChartHtml(snapshot: ChartSnapshot, checksum: string,
       <div class="species-copy"><p class="kicker">${lesson.theme === "cats" ? "WILD CAT" : "SHARK"} OF THE WEEK</p><h2>${escape(lesson.name)}</h2><p class="scientific-name">${escape(lesson.scientificName)}</p><h3>${escape(lesson.title)}</h3><p>${escape(lesson.fact)}</p><p><strong>Wonder together:</strong> ${escape(lesson.question)}</p><p class="species-source">Learn more: <a href="${escape(lesson.sourceUrl)}">${escape(lesson.sourceName)}</a></p></div>
     </aside>` : ""}
     <footer class="page-footer"><span>TIDY WEEK · ${escape(snapshot.householdName)}</span><span>Layout v${snapshot.layoutVersion ?? 1} · ${pageIndex + 1}/${pages.length} · ${escape(checksum)}</span></footer>
-  </section>`; }).join("");
+  </section>${inset ? "</div>" : ""}`; }).join("");
   const toolbar = includeToolbar ? `<div class="download-bar"><a href="/">← Family board</a><a href="/api/v1/chart-exports/${snapshot.chartId}/pdf">Download PDF</a></div>` : "";
   return `<!doctype html><html><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width"/><title>${escape(snapshot.memberName)}’s Chore Chart</title><style>${PRINT_CSS}</style></head><body>${toolbar}${content}</body></html>`;
 }
