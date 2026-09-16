@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   addDays,
   chartRowsPerPage,
+  chartCheckboxBox,
   weeklySpeciesLesson,
   type SpeciesLesson,
   dateInTimeZone,
@@ -132,7 +133,7 @@ export interface ChartSnapshot {
   themeKey: string;
   planRevision: number;
   rows: ChartRow[];
-  layoutVersion?: 1 | 2;
+  layoutVersion?: 1 | 2 | 3;
   speciesLesson?: SpeciesLesson & { photo: SpeciesPhoto };
 }
 
@@ -839,6 +840,7 @@ export function createChartExport(planId: string, memberId: string, themeKey?: s
     const key = `${base}:${slot}`;
     grouped.set(key, [...(grouped.get(key) ?? []), occurrence]);
   }
+  const routineOrder = new Map(listRoutines(plan.householdId, db).map((routine) => [routine.name, routine.sortOrder]));
   const rows: ChartRow[] = [...grouped.entries()].map(([key, items]) => ({
     key,
     title: items[0].choreTitle,
@@ -847,7 +849,7 @@ export function createChartExport(planId: string, memberId: string, themeKey?: s
       const occurrence = items.find((item) => item.dueDate === date);
       return { date, occurrenceId: occurrence?.id ?? null, completed: Boolean(occurrence?.completionId) };
     })
-  })).sort((a, b) => (a.routineName ?? "").localeCompare(b.routineName ?? "") || a.title.localeCompare(b.title));
+  })).sort((a, b) => (routineOrder.get(a.routineName ?? "") ?? Number.MAX_SAFE_INTEGER) - (routineOrder.get(b.routineName ?? "") ?? Number.MAX_SAFE_INTEGER) || (a.routineName ?? "").localeCompare(b.routineName ?? "") || a.title.localeCompare(b.title));
 
   const chartId = id();
   const snapshot: ChartSnapshot = {
@@ -861,7 +863,7 @@ export function createChartExport(planId: string, memberId: string, themeKey?: s
     rows
   };
   const lesson = weeklySpeciesLesson(snapshot.themeKey, snapshot.weekStartDate);
-  snapshot.layoutVersion = lesson ? 2 : 1;
+  snapshot.layoutVersion = 3;
   if (lesson) snapshot.speciesLesson = { ...lesson, photo: speciesPhoto(lesson.speciesId) };
   const rowsPerPage = chartRowsPerPage(snapshot.layoutVersion);
   const cellManifest = rows.flatMap((row, rowIndex) => row.cells
@@ -870,7 +872,7 @@ export function createChartExport(planId: string, memberId: string, themeKey?: s
       page: Math.floor(rowIndex / rowsPerPage) + 1,
       row: rowIndex % rowsPerPage,
       column: dayIndex,
-      box: { x: 3.265 + dayIndex * 0.711, y: 2.43 + (rowIndex % rowsPerPage) * 0.42, width: 0.22, height: 0.22 }
+      box: chartCheckboxBox(Math.min(rowsPerPage, rows.length - Math.floor(rowIndex / rowsPerPage) * rowsPerPage), rowIndex % rowsPerPage, dayIndex)
     }) : null)
     .filter(Boolean));
   const serialized = JSON.stringify(snapshot);

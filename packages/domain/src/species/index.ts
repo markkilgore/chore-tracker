@@ -135,4 +135,4 @@ export function weeklySpeciesLesson(themeKey: string, date: ISODate): SpeciesLes
   return { id: `${species.id}-lesson-${lessonIndex + 1}-v1`, speciesId: species.id, collectionVersion: 1, theme,
     name: species.name, scientificName: species.scientificName, title, fact, question, sourceName: species.sourceName, sourceUrl: species.sourceUrl };
 }
-export const chartRowsPerPage = (layoutVersion = 1) => layoutVersion === 2 ? 12 : 18;
+export const chartRowsPerPage = (layoutVersion = 1) => layoutVersion >= 2 ? 12 : 18;

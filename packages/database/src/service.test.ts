@@ -2,7 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { addDays, dateInTimeZone } from "@chore-tracker/domain";
+import { addDays, dateInTimeZone, chartCheckboxBox } from "@chore-tracker/domain";
 import {
   addOneOff,
   applyResponsibilityToWeek,
@@ -50,19 +50,28 @@ describe("SQLite application model", () => {
     const issued = getChartExport(chartId, db);
     expect(issued.snapshot.speciesLesson?.speciesId).toBe("sand-cat");
     expect(issued.snapshot.speciesLesson?.photo.dataUrl).toMatch(/^data:image\/jpeg;base64,/);
-    expect(issued.snapshot.layoutVersion).toBe(2);
+    expect(issued.snapshot.layoutVersion).toBe(3);
     const manifest = issued.manifest as Array<{ page: number; row: number; box: { y: number } }>;
     expect(manifest.some((cell) => cell.page === 2)).toBe(true);
     expect(manifest.every((cell) => cell.row < 12)).toBe(true);
-    expect(manifest.find((cell) => cell.page === 2 && cell.row === 0)?.box.y).toBe(2.43);
-    expect(db.prepare("SELECT layout_version FROM chart_exports WHERE id = ?").get(chartId)).toEqual({ layout_version: 2 });
+    expect(manifest.find((cell) => cell.page === 2 && cell.row === 0)?.box.y).toBe(chartCheckboxBox(issued.snapshot.rows.length - 12, 0, 0).y);
+    expect(db.prepare("SELECT layout_version FROM chart_exports WHERE id = ?").get(chartId)).toEqual({ layout_version: 3 });
     const next = materializeWeek(dashboard.household.id, "2026-09-20", db);
     const nextChart = getChartExport(createChartExport(next.id, kate.id, undefined, db), db);
     expect(nextChart.snapshot.speciesLesson?.speciesId).toBe("fishing-cat");
     expect(getChartExport(chartId, db)).toEqual(issued);
     const plain = getChartExport(createChartExport(week.id, kate.id, "sunny", db), db);
     expect(plain.snapshot.speciesLesson).toBeUndefined();
-    expect(plain.snapshot.layoutVersion).toBe(1);
+    expect(plain.snapshot.layoutVersion).toBe(3);
+  });
+
+  it("prints configured routines in daily order and puts unscheduled-time work last", () => {
+    const dashboard = getDashboard("2026-09-13", db)!;
+    const kate = dashboard.members.find((member) => member.displayName === "Kate")!;
+    const chart = getChartExport(createChartExport(dashboard.week.id, kate.id, undefined, db), db);
+    const names = chart.snapshot.rows.map((row) => row.routineName);
+    expect(names.indexOf("Morning")).toBeLessThan(names.indexOf("Evening"));
+    expect(names.indexOf("Evening")).toBeLessThan(names.indexOf("Weekly"));
   });
 
   it("materializes a week idempotently", () => {

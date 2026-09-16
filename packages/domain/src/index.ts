@@ -190,3 +190,5 @@ export function formatWeekRange(weekStart: ISODate): string {
 }
 
 export * from "./species";
+
+export * from "./chart-layout";
