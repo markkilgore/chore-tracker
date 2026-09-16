@@ -28,8 +28,13 @@ ENV NODE_ENV=production APP_ENV=production NEXT_TELEMETRY_DISABLED=1 PDF_CHROMIU
 RUN apt-get update && apt-get install -y --no-install-recommends chromium ca-certificates fonts-liberation && rm -rf /var/lib/apt/lists/*
 RUN groupadd --system --gid 1001 nodejs && useradd --system --create-home --home-dir /home/nextjs --uid 1001 --gid nodejs nextjs
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
+# Playwright loads support files dynamically; standalone tracing can omit them.
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/playwright ./node_modules/playwright
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/playwright-core ./node_modules/playwright-core
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/public ./apps/web/public
 USER nextjs
+# Exercise the shipped modules and Chromium as the actual runtime user.
+RUN node --input-type=module -e 'import { chromium } from "playwright"; const browser = await chromium.launch({ executablePath: process.env.PDF_CHROMIUM_PATH, args: ["--no-sandbox", "--disable-dev-shm-usage"] }); try { const page = await browser.newPage(); await page.setContent("<h1>PDF smoke check</h1>"); const pdf = await page.pdf(); if (pdf.subarray(0, 5).toString() !== "%PDF-") throw new Error("Invalid PDF"); } finally { await browser.close(); }'
 EXPOSE 3000
 CMD ["node", "apps/web/server.js"]
